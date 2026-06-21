@@ -1,4 +1,5 @@
 {
-  "buildCommand": "npm install && npm run build",
-  "outputDirectory": "build"
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
+  "framework": "react"
 }
