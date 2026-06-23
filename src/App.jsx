@@ -41,6 +41,8 @@ export default function App() {
   const isRecordingRef = useRef(false);
   // Acumula el texto final a través de múltiples reinicios del reconocimiento
   const finalTranscriptRef = useRef('');
+  // Índice del último resultado final ya procesado (evita duplicar texto)
+  const lastFinalIndexRef = useRef(0);
 
   useEffect(() => { statusRef.current = status; }, [status]);
   const isAuthed = !!token;
@@ -218,6 +220,7 @@ export default function App() {
 
     isRecordingRef.current = true;
     finalTranscriptRef.current = '';
+    lastFinalIndexRef.current = 0;
 
     const createRecognition = () => {
       const rec = new SR();
@@ -227,9 +230,16 @@ export default function App() {
 
       rec.onresult = e => {
         let interim = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
+        // Recorremos TODOS los resultados (no solo desde e.resultIndex),
+        // pero solo sumamos a finalTranscriptRef los que van DESPUÉS del
+        // último índice final ya procesado. Así nunca se duplica un
+        // fragmento que el navegador vuelve a incluir en e.results.
+        for (let i = 0; i < e.results.length; i++) {
           if (e.results[i].isFinal) {
-            finalTranscriptRef.current += e.results[i][0].transcript + ' ';
+            if (i >= lastFinalIndexRef.current) {
+              finalTranscriptRef.current += e.results[i][0].transcript + ' ';
+              lastFinalIndexRef.current = i + 1;
+            }
           } else {
             interim += e.results[i][0].transcript;
           }
@@ -251,6 +261,9 @@ export default function App() {
         if (isRecordingRef.current) {
           // El navegador cortó la sesión solo (timeout interno),
           // pero el usuario todavía no ha pulsado "detener": reiniciamos.
+          // Cada nueva instancia empieza su propio e.results desde cero,
+          // así que el contador de índice también debe reiniciarse.
+          lastFinalIndexRef.current = 0;
           try { recognitionRef.current = createRecognition(); recognitionRef.current.start(); }
           catch { isRecordingRef.current = false; setStatus('idle'); setStatusText(''); }
         } else {
