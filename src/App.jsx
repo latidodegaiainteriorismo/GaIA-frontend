@@ -202,12 +202,34 @@ export default function App() {
 
     resetSilenceTimer();
 
-    rec.onresult = e => {
+   rec.onresult = e => {
       eventCount++;
-      addLog(`EVT#${eventCount} resultIdx=${e.resultIndex} len=${e.results.length} finalCount=${lastFinalCount}`);
-      for (let j = 0; j < e.results.length; j++) {
-        addLog(`  [${j}] isFinal=${e.results[j].isFinal} "${e.results[j][0].transcript}"`);
+      addLog(`EVT#${eventCount} resultIdx=${e.resultIndex} len=${e.results.length}`);
+
+      // Solo procesar results FINAL cuyo contenido NO esté ya en final
+      for (let i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          const transcript = e.results[i][0].transcript;
+          if (transcript && !final.includes(transcript)) {
+            addLog(`  ✅ Nuevo: "${transcript}"`);
+            final += transcript;
+          }
+        }
       }
+
+      // interim: último NO FINAL en el array
+      let interim = '';
+      for (let i = e.results.length - 1; i >= 0; i--) {
+        if (!e.results[i].isFinal) {
+          interim = e.results[i][0].transcript;
+          break;
+        }
+      }
+
+      addLog(`  final="${final}" interim="${interim}"`);
+      setStatusText((final + interim).trim() || 'Te escucho...');
+      resetSilenceTimer();
+    };
 
       for (let i = lastFinalCount; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
