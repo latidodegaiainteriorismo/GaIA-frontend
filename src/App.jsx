@@ -10,6 +10,12 @@ const api = (path, opts = {}, token = null) => {
   return fetch(`${API_URL}${path}`, { ...opts, headers }).then(r => r.json());
 };
 
+const apiText = (path, token = null) => {
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(`${API_URL}${path}`, { headers }).then(r => r.ok ? r.text() : Promise.reject(r.status));
+};
+
 export default function App() {
   const [token,    setToken]    = useState(() => localStorage.getItem('gaia_token'));
   const [username, setUsername] = useState(() => localStorage.getItem('gaia_username') || '');
@@ -35,6 +41,19 @@ export default function App() {
   const [astroLoading,  setAstroLoading]  = useState(false);
   const [astroError,    setAstroError]    = useState('');
   const [astroForm,     setAstroForm]     = useState({ birth_date: '', birth_time: '', birth_place: '' });
+
+  // ── Astrología: varias personas ──────────────────────────────────────────
+  const [charts,          setCharts]          = useState([]);       // lista de personas guardadas
+  const [selectedPerson,  setSelectedPerson]  = useState('yo');      // persona activa en el modal
+  const [showAddPerson,   setShowAddPerson]   = useState(false);
+  const [personForm,      setPersonForm]      = useState({ person_name: '', relationship: '', birth_date: '', birth_time: '', birth_place: '' });
+
+  // ── Visor de carta (SVG) ─────────────────────────────────────────────────
+  const [chartSvg,       setChartSvg]       = useState(null);   // svg como string, o null
+  const [chartSvgLoading,setChartSvgLoading]= useState(false);
+  const [chartSvgError,  setChartSvgError]  = useState('');
+  const [transitDate,    setTransitDate]    = useState(() => new Date().toISOString().slice(0, 10));
+  const [chartViewMode,  setChartViewMode]  = useState('natal'); // 'natal' | 'transitos'
 
   const addLog = (msg) => {
     const time = new Date().toLocaleTimeString('es', { hour12: false });
@@ -82,7 +101,8 @@ export default function App() {
     try { await api('/auth/logout', { method: 'POST' }, token); } catch {}
     localStorage.removeItem('gaia_token'); localStorage.removeItem('gaia_username');
     setToken(null); setUsername(''); setConversations([]); setMessages([]); setCurrentConvId(null);
-    setBirthChart(null); setShowAstro(false);
+    setBirthChart(null); setShowAstro(false); setChartSvg(null); setChartSvgError('');
+    setCharts([]); setSelectedPerson('yo'); setShowAddPerson(false);
   };
 
   const fetchConvs = useCallback(async (tok = token) => {
@@ -93,16 +113,30 @@ export default function App() {
   useEffect(() => { if (token) fetchConvs(); }, [token]);
 
   // ── Astrología ────────────────────────────────────────────────────────────
-  const fetchBirthChart = useCallback(async (tok = token) => {
+  const fetchCharts = useCallback(async (tok = token) => {
     if (!tok) return;
     try {
-      const data = await api('/astrology/birth-chart', {}, tok);
+      const data = await api('/astrology/charts', {}, tok);
+      if (Array.isArray(data)) setCharts(data);
+    } catch {}
+  }, [token]);
+
+  const fetchBirthChart = useCallback(async (person = selectedPerson, tok = token) => {
+    if (!tok) return;
+    try {
+      const data = await api(`/astrology/birth-chart?person=${encodeURIComponent(person)}`, {}, tok);
       if (data && !data.error) setBirthChart(data);
       else setBirthChart(false); // false = consultado, pero no existe (distinto de null = aún no consultado)
     } catch { setBirthChart(false); }
-  }, [token]);
+  }, [token, selectedPerson]);
 
-  useEffect(() => { if (token) fetchBirthChart(); }, [token, fetchBirthChart]);
+  useEffect(() => { if (token) { fetchBirthChart('yo'); fetchCharts(); } }, [token]);
+
+  const selectPerson = useCallback((person) => {
+    setSelectedPerson(person);
+    setChartSvg(null);
+    fetchBirthChart(person);
+  }, [fetchBirthChart]);
 
   const submitBirthChart = useCallback(async () => {
     const { birth_date, birth_time, birth_place } = astroForm;
@@ -114,15 +148,62 @@ export default function App() {
     try {
       const data = await api('/astrology/birth-chart', {
         method: 'POST',
-        body: JSON.stringify({ birth_date, birth_time, birth_place: birth_place.trim() })
+        body: JSON.stringify({ birth_date, birth_time, birth_place: birth_place.trim(), person_label: 'yo' })
       }, token);
       if (data.error) { setAstroError(data.error); }
-      else { setBirthChart(data); }
+      else { setBirthChart(data); fetchCharts(); }
     } catch {
       setAstroError('Error de conexión. Intenta de nuevo.');
     }
     setAstroLoading(false);
-  }, [astroForm, token]);
+  }, [astroForm, token, fetchCharts]);
+
+  // ── Astrología: añadir otra persona ──────────────────────────────────────
+  const submitNewPerson = useCallback(async () => {
+    const { person_name, relationship, birth_date, birth_time, birth_place } = personForm;
+    if (!person_name.trim() || !birth_date || !birth_time || !birth_place.trim()) {
+      setAstroError('Completa nombre, fecha, hora y lugar de nacimiento.');
+      return;
+    }
+    setAstroLoading(true); setAstroError('');
+    const person_label = relationship.trim() ? `${person_name.trim()} (${relationship.trim()})` : person_name.trim();
+    try {
+      const data = await api('/astrology/birth-chart', {
+        method: 'POST',
+        body: JSON.stringify({
+          birth_date, birth_time, birth_place: birth_place.trim(),
+          person_label, relationship: relationship.trim() || null
+        })
+      }, token);
+      if (data.error) { setAstroError(data.error); }
+      else {
+        await fetchCharts();
+        setShowAddPerson(false);
+        setPersonForm({ person_name: '', relationship: '', birth_date: '', birth_time: '', birth_place: '' });
+        selectPerson(person_label);
+      }
+    } catch {
+      setAstroError('Error de conexión. Intenta de nuevo.');
+    }
+    setAstroLoading(false);
+  }, [personForm, token, fetchCharts, selectPerson]);
+
+  // ── Visor de carta (SVG) ─────────────────────────────────────────────────
+  const loadChartSvg = useCallback(async (mode, date = null) => {
+    setChartSvgLoading(true); setChartSvgError(''); setChartSvg(null);
+    setChartViewMode(mode);
+    try {
+      const personParam = `person=${encodeURIComponent(selectedPerson)}`;
+      const path = mode === 'natal'
+        ? `/astrology/birth-chart/svg?${personParam}`
+        : `/astrology/transits/svg?${personParam}&date=${date || transitDate}`;
+      const svg = await apiText(path, token);
+      setChartSvg(svg);
+    } catch {
+      setChartSvgError('No se pudo generar el dibujo de la carta. Intenta de nuevo.');
+    }
+    setChartSvgLoading(false);
+  }, [token, transitDate, selectedPerson]);
 
 
   const selectConv = async (id) => {
@@ -470,13 +551,59 @@ export default function App() {
 
       {/* Modal Carta Astral */}
       {showAstro && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(74,74,70,.35)', zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => setShowAstro(false)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(74,74,70,.35)', zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => { setShowAstro(false); setChartSvg(null); }}>
           <div style={{ background: '#FAFAF8', borderRadius: '20px', maxWidth: '380px', width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '28px 24px', border: '0.5px solid rgba(107,158,160,.25)', boxShadow: '0 12px 40px rgba(74,74,70,.18)' }} onClick={e => e.stopPropagation()}>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <span style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontStyle: 'italic', fontSize: '24px', fontWeight: 300, color: '#A0693A', letterSpacing: '.02em' }}>✧ Carta astral</span>
-              <button onClick={() => setShowAstro(false)} style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '20px', padding: 0, lineHeight: 1, opacity: .5 }}>×</button>
+              <button onClick={() => { setShowAstro(false); setChartSvg(null); }} style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '20px', padding: 0, lineHeight: 1, opacity: .5 }}>×</button>
             </div>
+
+            {/* Selector de personas — solo si ya tiene al menos la propia carta */}
+            {charts.length > 0 && (
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                {charts.map(c => (
+                  <button key={c.person_label} onClick={() => selectPerson(c.person_label)}
+                    style={{ padding: '5px 12px', borderRadius: '14px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit',
+                      border: selectedPerson === c.person_label ? '1px solid rgba(160,105,58,.5)' : '0.5px solid rgba(74,74,70,.18)',
+                      background: selectedPerson === c.person_label ? 'rgba(201,149,107,.14)' : 'transparent',
+                      color: selectedPerson === c.person_label ? '#A0693A' : '#4A4A46', opacity: selectedPerson === c.person_label ? 1 : .6 }}>
+                    {c.person_label === 'yo' ? 'Yo' : c.person_label}
+                  </button>
+                ))}
+                <button onClick={() => setShowAddPerson(s => !s)}
+                  style={{ padding: '5px 12px', borderRadius: '14px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit', border: '0.5px dashed rgba(74,123,126,.4)', background: 'transparent', color: '#4A7B7E' }}>
+                  + añadir persona
+                </button>
+              </div>
+            )}
+
+            {/* Formulario de nueva persona (pareja, hijos, familiares...) */}
+            {showAddPerson && (
+              <div style={{ background: 'rgba(107,158,160,.06)', border: '0.5px solid rgba(107,158,160,.18)', borderRadius: '14px', padding: '14px', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <span style={{ fontSize: '11px', color: '#4A7B7E', opacity: .8, fontStyle: 'italic' }}>Añadir carta de otra persona</span>
+                <input type="text" value={personForm.person_name} onChange={e => setPersonForm(f => ({ ...f, person_name: e.target.value }))}
+                  placeholder="Nombre" autoComplete="off"
+                  style={{ padding: '9px 12px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                <input type="text" value={personForm.relationship} onChange={e => setPersonForm(f => ({ ...f, relationship: e.target.value }))}
+                  placeholder="Relación (hijo, pareja, madre...) — opcional" autoComplete="off"
+                  style={{ padding: '9px 12px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="date" value={personForm.birth_date} onChange={e => setPersonForm(f => ({ ...f, birth_date: e.target.value }))}
+                    style={{ flex: 1, padding: '9px 10px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                  <input type="time" value={personForm.birth_time} onChange={e => setPersonForm(f => ({ ...f, birth_time: e.target.value }))}
+                    style={{ flex: 1, padding: '9px 10px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                </div>
+                <input type="text" value={personForm.birth_place} onChange={e => setPersonForm(f => ({ ...f, birth_place: e.target.value }))}
+                  placeholder="Ciudad, país" autoComplete="off"
+                  style={{ padding: '9px 12px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                {astroError && <p style={{ color: '#C96B6B', fontSize: '12px', margin: 0 }}>{astroError}</p>}
+                <button onClick={submitNewPerson} disabled={astroLoading}
+                  style={{ padding: '10px', borderRadius: '20px', border: 'none', fontSize: '13px', cursor: astroLoading ? 'default' : 'pointer', fontFamily: 'inherit', background: astroLoading ? 'rgba(74,74,70,.1)' : 'rgba(107,158,160,.88)', color: astroLoading ? 'rgba(74,74,70,.4)' : 'white' }}>
+                  {astroLoading ? 'Calculando...' : 'Calcular su carta'}
+                </button>
+              </div>
+            )}
 
             {/* Estado: cargando la primera consulta */}
             {birthChart === null && (
@@ -541,8 +668,42 @@ export default function App() {
                 </div>
 
                 <p style={{ fontSize: '12px', color: '#4A4A46', opacity: .45, fontStyle: 'italic', lineHeight: 1.6, textAlign: 'center', margin: '4px 0 0' }}>
-                  Ya tengo tu carta natal guardada. Pregúntame cuando quieras por tus tránsitos actuales o lo que veas en tu cielo hoy.
+                  {selectedPerson === 'yo'
+                    ? 'Ya tengo tu carta natal guardada. Pregúntame cuando quieras por tus tránsitos actuales o lo que veas en tu cielo hoy.'
+                    : `Ya tengo la carta natal de ${selectedPerson}. Pregúntame por su carta o sus tránsitos cuando quieras.`}
                 </p>
+
+                <div style={{ borderTop: '0.5px solid rgba(74,74,70,.1)', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => loadChartSvg('natal')} style={{ flex: 1, padding: '8px', borderRadius: '14px', border: chartViewMode === 'natal' && chartSvg ? '1px solid rgba(74,123,126,.5)' : '0.5px solid rgba(74,74,70,.2)', background: chartViewMode === 'natal' && chartSvg ? 'rgba(107,158,160,.1)' : 'white', color: '#4A7B7E', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      Ver carta natal
+                    </button>
+                    <button onClick={() => loadChartSvg('transitos')} style={{ flex: 1, padding: '8px', borderRadius: '14px', border: chartViewMode === 'transitos' && chartSvg ? '1px solid rgba(160,105,58,.5)' : '0.5px solid rgba(74,74,70,.2)', background: chartViewMode === 'transitos' && chartSvg ? 'rgba(201,149,107,.1)' : 'white', color: '#A0693A', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                      Ver tránsitos
+                    </button>
+                  </div>
+
+                  {chartViewMode === 'transitos' && (
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input type="date" value={transitDate} onChange={e => setTransitDate(e.target.value)}
+                        style={{ flex: 1, padding: '8px 10px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                      <button onClick={() => loadChartSvg('transitos', transitDate)} style={{ padding: '8px 14px', borderRadius: '12px', border: 'none', background: 'rgba(160,105,58,.88)', color: 'white', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                        Calcular
+                      </button>
+                    </div>
+                  )}
+
+                  {chartSvgLoading && (
+                    <p style={{ fontSize: '12px', color: '#4A4A46', opacity: .4, fontStyle: 'italic', textAlign: 'center', padding: '12px 0' }}>Dibujando tu carta...</p>
+                  )}
+
+                  {chartSvgError && <p style={{ color: '#C96B6B', fontSize: '12px', margin: 0, textAlign: 'center' }}>{chartSvgError}</p>}
+
+                  {chartSvg && !chartSvgLoading && (
+                    <div style={{ background: 'white', borderRadius: '14px', border: '0.5px solid rgba(74,74,70,.12)', padding: '8px', display: 'flex', justifyContent: 'center' }}
+                      dangerouslySetInnerHTML={{ __html: chartSvg }} />
+                  )}
+                </div>
               </div>
             )}
 
