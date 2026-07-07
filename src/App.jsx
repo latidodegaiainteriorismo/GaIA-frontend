@@ -1,5 +1,6 @@
 /* eslint-disable */
 import { useState, useEffect, useRef, useCallback } from "react";
+import gaiaAvatar from './assets/gaia-avatar.png';
 
 const API_URL    = process.env.REACT_APP_API_URL    || 'https://gaia-2py8.onrender.com';
 const GOOGLE_CID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
@@ -69,6 +70,12 @@ export default function App() {
   const msgsEndRef     = useRef(null);
   const tempHistRef    = useRef([]);
   const audioRef       = useRef(null);   // ← referencia al audio activo
+
+  // ── Cara animada por audio (Fase 1: boca reactiva al volumen) ────────────
+  const audioCtxRef   = useRef(null);   // AudioContext — se crea una vez y se reutiliza
+  const analyserRef   = useRef(null);
+  const mouthRafRef   = useRef(null);
+  const [mouthOpen, setMouthOpen] = useState(0); // 0 a 1 — abertura de boca en tiempo real
 
   useEffect(() => { statusRef.current = status; }, [status]);
   const isAuthed = !!token;
@@ -260,16 +267,58 @@ export default function App() {
 
   useEffect(() => { msgsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // ── Audio ─────────────────────────────────────────────────────────────────
+  // ── Audio + análisis de volumen para animar la boca ─────────────────────
   const playAudio = useCallback((b64) => {
     try {
       const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
       const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
       const audio = new Audio(url);
       audioRef.current = audio;
+
+      // ── Análisis de volumen en tiempo real para animar la boca ──
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      try {
+        const source   = ctx.createMediaElementSource(audio);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        analyser.connect(ctx.destination); // necesario para que el audio siga sonando
+        analyserRef.current = analyser;
+
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          analyser.getByteFrequencyData(data);
+          // Banda de voz aproximada (graves-medios), ignora ruido de fondo muy bajo
+          const voiceBins = data.slice(2, 36);
+          const avg = voiceBins.reduce((a, b) => a + b, 0) / voiceBins.length / 255;
+          setMouthOpen(avg);
+          mouthRafRef.current = requestAnimationFrame(tick);
+        };
+        tick();
+      } catch (analyserErr) {
+        console.warn('[Audio] Analizador no disponible:', analyserErr);
+      }
+
       audio.onplay  = () => setStatus('speaking');
-      audio.onended = () => { setStatus('idle'); URL.revokeObjectURL(url); audioRef.current = null; };
-      audio.onerror = () => { setStatus('idle'); URL.revokeObjectURL(url); audioRef.current = null; };
+      audio.onended = () => {
+        setStatus('idle');
+        cancelAnimationFrame(mouthRafRef.current);
+        setMouthOpen(0);
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+      };
+      audio.onerror = () => {
+        setStatus('idle');
+        cancelAnimationFrame(mouthRafRef.current);
+        setMouthOpen(0);
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+      };
       audio.play();
     } catch (e) { console.error('[Audio]', e); setStatus('idle'); }
   }, []);
@@ -280,6 +329,8 @@ export default function App() {
       audioRef.current.pause();
       audioRef.current = null;
     }
+    cancelAnimationFrame(mouthRafRef.current);
+    setMouthOpen(0);
     setStatus('idle');
   }, []);
 
@@ -464,8 +515,34 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ height: '90px', flexShrink: 0 }}>
-          <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+        {/* ── Cara de GaIA + boca animada por el volumen del audio ──────────── */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ position: 'relative', width: '120px', height: '120px', marginTop: '10px' }}>
+            <img
+              src={gaiaAvatar}
+              alt="GaIA"
+              style={{
+                width: '100%', height: '100%', objectFit: 'cover',
+                objectPosition: '50% 25%', borderRadius: '50%',
+                boxShadow: status === 'speaking' ? '0 0 22px rgba(107,158,160,.45)' : '0 0 10px rgba(107,158,160,.15)',
+                transition: 'box-shadow .3s'
+              }}
+            />
+            {/* Overlay de boca — ajusta left/top si no coincide con tu foto */}
+            <div style={{
+              position: 'absolute', left: '50%', top: '63%',
+              width: '16px',
+              height: `${5 + mouthOpen * 16}px`,
+              background: 'rgba(80,35,35,.55)',
+              borderRadius: '50%',
+              transform: 'translate(-50%,-50%)',
+              transition: 'height 60ms linear',
+              pointerEvents: 'none'
+            }} />
+          </div>
+          <div style={{ height: '50px', width: '100%' }}>
+            <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+          </div>
         </div>
 
         <div style={{ textAlign: 'center', height: '22px', fontSize: '13px', color: '#4A7B7E', fontStyle: 'italic', opacity: statusText ? .8 : 0, transition: 'opacity .3s', flexShrink: 0, lineHeight: '22px' }}>{statusText}</div>
