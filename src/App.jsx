@@ -77,6 +77,19 @@ export default function App() {
   const mouthRafRef   = useRef(null);
   const [mouthOpen, setMouthOpen] = useState(0); // 0 a 1 — abertura de boca en tiempo real
 
+  // IMPORTANTE: los navegadores exigen crear/despertar el AudioContext dentro
+  // del gesto directo del usuario (clic), no después de esperar al backend.
+  // Por eso este "desbloqueo" se llama síncronamente en el onClick de enviar
+  // y del micrófono, ANTES de que exista ningún audio todavía.
+  const unlockAudioContext = useCallback(() => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+  }, []);
+
   useEffect(() => { statusRef.current = status; }, [status]);
   const isAuthed = !!token;
 
@@ -276,11 +289,11 @@ export default function App() {
       audioRef.current = audio;
 
       // ── Análisis de volumen en tiempo real para animar la boca ──
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
+      // El AudioContext ya se creó/desbloqueó en el clic (unlockAudioContext).
+      // Si por lo que sea no existiera todavía (p.ej. modo temporal con otro
+      // flujo), lo creamos aquí como red de seguridad.
+      unlockAudioContext();
       const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') ctx.resume();
 
       try {
         const source   = ctx.createMediaElementSource(audio);
@@ -369,6 +382,7 @@ export default function App() {
 
   // ── Mic ───────────────────────────────────────────────────────────────────
   const startListening = useCallback(() => {
+    unlockAudioContext(); // ← dentro del gesto de clic, antes de esperar al backend
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setMode('text'); return; }
 
@@ -433,16 +447,17 @@ export default function App() {
 
     rec.start();
     addLog('START');
-  }, [callGaIA]);
+  }, [callGaIA, unlockAudioContext]);
 
   const stopListening = useCallback(() => { recognitionRef.current?.stop(); }, []);
 
   const sendText = useCallback(() => {
     const t = textInput.trim();
     if (!t || isLoading) return;
+    unlockAudioContext(); // ← dentro del gesto de clic, antes de esperar al backend
     setMessages(prev => [...prev, { role: 'user', content: t }]);
     setTextInput(''); callGaIA(t);
-  }, [textInput, isLoading, callGaIA]);
+  }, [textInput, isLoading, callGaIA, unlockAudioContext]);
 
   const toggleMode = () => { if (status === 'listening') stopListening(); setMode(m => m === 'voice' ? 'text' : 'voice'); };
   const micDisabled = status === 'thinking' || isLoading;
@@ -517,28 +532,42 @@ export default function App() {
 
         {/* ── Cara de GaIA + boca animada por el volumen del audio ──────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-          <div style={{ position: 'relative', width: '120px', height: '120px', marginTop: '10px' }}>
+          <div style={{
+            position: 'relative',
+            width:  'min(33vh, 85vw, 340px)',
+            height: 'min(33vh, 85vw, 340px)',
+            marginTop: '10px'
+          }}>
             <img
               src={gaiaAvatar}
               alt="GaIA"
               style={{
                 width: '100%', height: '100%', objectFit: 'cover',
                 objectPosition: '50% 25%', borderRadius: '50%',
-                boxShadow: status === 'speaking' ? '0 0 22px rgba(107,158,160,.45)' : '0 0 10px rgba(107,158,160,.15)',
+                boxShadow: status === 'speaking' ? '0 0 32px rgba(107,158,160,.45)' : '0 0 14px rgba(107,158,160,.15)',
                 transition: 'box-shadow .3s'
               }}
             />
-            {/* Overlay de boca — ajusta left/top si no coincide con tu foto */}
+            {/* Overlay de boca — en % del contenedor, ajusta left/top si no coincide con tu foto */}
             <div style={{
               position: 'absolute', left: '50%', top: '63%',
-              width: '16px',
-              height: `${5 + mouthOpen * 16}px`,
+              width: '13%',
+              height: `${4 + mouthOpen * 13}%`,
               background: 'rgba(80,35,35,.55)',
               borderRadius: '50%',
               transform: 'translate(-50%,-50%)',
               transition: 'height 60ms linear',
               pointerEvents: 'none'
             }} />
+            {/* Indicador de debug — solo visible con el botón 🔍, para comprobar si el análisis de audio funciona */}
+            {showDebug && (
+              <div style={{
+                position: 'absolute', bottom: '-22px', left: '50%', transform: 'translateX(-50%)',
+                fontSize: '11px', fontFamily: 'monospace', color: '#4A7B7E', whiteSpace: 'nowrap'
+              }}>
+                mouthOpen: {mouthOpen.toFixed(3)} · ctx: {audioCtxRef.current?.state || 'sin crear'}
+              </div>
+            )}
           </div>
           <div style={{ height: '50px', width: '100%' }}>
             <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
