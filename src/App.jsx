@@ -76,6 +76,7 @@ export default function App() {
   const analyserRef   = useRef(null);
   const mouthRafRef   = useRef(null);
   const [mouthOpen, setMouthOpen] = useState(0); // 0 a 1 — abertura de boca en tiempo real
+  const [mouthPos, setMouthPos] = useState({ left: 50, top: 63 }); // % — ajustable en modo debug
 
   // IMPORTANTE: los navegadores exigen crear/despertar el AudioContext dentro
   // del gesto directo del usuario (clic), no después de esperar al backend.
@@ -536,7 +537,8 @@ export default function App() {
             position: 'relative',
             width:  'min(33vh, 85vw, 340px)',
             height: 'min(33vh, 85vw, 340px)',
-            marginTop: '10px'
+            marginTop: '10px',
+            marginBottom: showDebug ? '90px' : '0'
           }}>
             <img
               src={gaiaAvatar}
@@ -548,24 +550,33 @@ export default function App() {
                 transition: 'box-shadow .3s'
               }}
             />
-            {/* Overlay de boca — en % del contenedor, ajusta left/top si no coincide con tu foto */}
+            {/* Overlay de boca — posición ajustable con los controles de abajo (modo debug) */}
             <div style={{
-              position: 'absolute', left: '50%', top: '63%',
+              position: 'absolute', left: `${mouthPos.left}%`, top: `${mouthPos.top}%`,
               width: '13%',
               height: `${4 + mouthOpen * 13}%`,
-              background: 'rgba(80,35,35,.55)',
+              background: showDebug ? 'rgba(230,30,30,.85)' : 'rgba(80,35,35,.55)',
+              border: showDebug ? '1px solid white' : 'none',
               borderRadius: '50%',
               transform: 'translate(-50%,-50%)',
               transition: 'height 60ms linear',
               pointerEvents: 'none'
             }} />
-            {/* Indicador de debug — solo visible con el botón 🔍, para comprobar si el análisis de audio funciona */}
+            {/* Controles de calibración — solo en modo debug */}
             {showDebug && (
               <div style={{
-                position: 'absolute', bottom: '-22px', left: '50%', transform: 'translateX(-50%)',
+                position: 'absolute', bottom: '-84px', left: '50%', transform: 'translateX(-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
                 fontSize: '11px', fontFamily: 'monospace', color: '#4A7B7E', whiteSpace: 'nowrap'
               }}>
-                mouthOpen: {mouthOpen.toFixed(3)} · ctx: {audioCtxRef.current?.state || 'sin crear'}
+                <div>mouthOpen: {mouthOpen.toFixed(3)} · ctx: {audioCtxRef.current?.state || 'sin crear'}</div>
+                <div>left: {mouthPos.left}% · top: {mouthPos.top}%</div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button onClick={() => setMouthPos(p => ({ ...p, top: p.top - 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>↑</button>
+                  <button onClick={() => setMouthPos(p => ({ ...p, top: p.top + 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>↓</button>
+                  <button onClick={() => setMouthPos(p => ({ ...p, left: p.left - 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>←</button>
+                  <button onClick={() => setMouthPos(p => ({ ...p, left: p.left + 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>→</button>
+                </div>
               </div>
             )}
           </div>
