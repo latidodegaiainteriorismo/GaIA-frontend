@@ -75,8 +75,8 @@ export default function App() {
   const audioCtxRef   = useRef(null);   // AudioContext — se crea una vez y se reutiliza
   const analyserRef   = useRef(null);
   const mouthRafRef   = useRef(null);
-  const [mouthOpen, setMouthOpen] = useState(0); // 0 a 1 — abertura de boca en tiempo real
-  const [mouthPos, setMouthPos] = useState({ left: 50, top: 43 }); // % — calibrado sobre la foto real
+  const [mouthOpen, setMouthOpen] = useState(0); // 0 a 1 — intensidad de voz en tiempo real (suavizada)
+  const smoothMouthRef = useRef(0); // valor suavizado internamente (evita parpadeos a tirones)
 
   // IMPORTANTE: los navegadores exigen crear/despertar el AudioContext dentro
   // del gesto directo del usuario (clic), no después de esperar al backend.
@@ -309,8 +309,10 @@ export default function App() {
           analyser.getByteFrequencyData(data);
           // Banda de voz aproximada (graves-medios), ignora ruido de fondo muy bajo
           const voiceBins = data.slice(2, 36);
-          const avg = voiceBins.reduce((a, b) => a + b, 0) / voiceBins.length / 255;
-          setMouthOpen(avg);
+          const raw = voiceBins.reduce((a, b) => a + b, 0) / voiceBins.length / 255;
+          // Suavizado (media móvil exponencial) para que la luz fluya en vez de dar tirones
+          smoothMouthRef.current = smoothMouthRef.current * 0.82 + raw * 0.18;
+          setMouthOpen(smoothMouthRef.current);
           mouthRafRef.current = requestAnimationFrame(tick);
         };
         tick();
@@ -322,6 +324,7 @@ export default function App() {
       audio.onended = () => {
         setStatus('idle');
         cancelAnimationFrame(mouthRafRef.current);
+        smoothMouthRef.current = 0;
         setMouthOpen(0);
         URL.revokeObjectURL(url);
         audioRef.current = null;
@@ -329,6 +332,7 @@ export default function App() {
       audio.onerror = () => {
         setStatus('idle');
         cancelAnimationFrame(mouthRafRef.current);
+        smoothMouthRef.current = 0;
         setMouthOpen(0);
         URL.revokeObjectURL(url);
         audioRef.current = null;
@@ -344,6 +348,7 @@ export default function App() {
       audioRef.current = null;
     }
     cancelAnimationFrame(mouthRafRef.current);
+    smoothMouthRef.current = 0;
     setMouthOpen(0);
     setStatus('idle');
   }, []);
@@ -482,7 +487,10 @@ export default function App() {
 
   return (
     <div style={{ height: '100vh', background: '#FAFAF8', display: 'flex', fontFamily: "'Inter',-apple-system,sans-serif", color: '#4A4A46', overflow: 'hidden' }}>
-      <style>{`@keyframes gPulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:.85;transform:scale(1.15)}}`}</style>
+      <style>{`
+        @keyframes gPulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:.85;transform:scale(1.15)}}
+        @keyframes gaiaSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+      `}</style>
 
       {showSidebar && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.25)', zIndex: 10 }} onClick={() => setShowSidebar(false)} />}
 
@@ -531,52 +539,49 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Cara de GaIA + boca animada por el volumen del audio ──────────── */}
+        {/* ── Cara de GaIA con efectos de luz que simulan que habla ─────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
           <div style={{
             position: 'relative',
             width:  'min(33vh, 85vw, 340px)',
             height: 'min(33vh, 85vw, 340px)',
-            marginTop: '10px',
-            marginBottom: showDebug ? '90px' : '0'
+            marginTop: '10px'
           }}>
+            {/* Halo pulsante — su intensidad sigue el volumen real de la voz */}
+            <div style={{
+              position: 'absolute', inset: '-14px', borderRadius: '50%',
+              background: 'radial-gradient(circle, rgba(107,158,160,0) 62%, rgba(107,158,160,.55) 72%, rgba(107,158,160,0) 78%)',
+              opacity: status === 'speaking' ? 0.35 + mouthOpen * 0.65 : status === 'listening' ? 0.5 : 0.15,
+              transform: `scale(${status === 'speaking' ? 1 + mouthOpen * 0.05 : 1})`,
+              transition: 'opacity 90ms linear, transform 90ms linear',
+              pointerEvents: 'none'
+            }} />
+            {/* Brillo giratorio ambiental — sutil, da sensación de "viva" incluso en silencios */}
+            <div style={{
+              position: 'absolute', inset: '-6px', borderRadius: '50%',
+              background: 'conic-gradient(from 0deg, rgba(201,149,107,0) 0%, rgba(201,149,107,.5) 8%, rgba(201,149,107,0) 20%, rgba(107,158,160,0) 60%, rgba(107,158,160,.4) 70%, rgba(107,158,160,0) 82%)',
+              opacity: status === 'speaking' ? 0.8 : status === 'listening' || status === 'thinking' ? 0.5 : 0.25,
+              animation: `gaiaSpin ${status === 'speaking' ? 3 : 7}s linear infinite`,
+              pointerEvents: 'none'
+            }} />
             <img
               src={gaiaAvatar}
               alt="GaIA"
               style={{
-                width: '100%', height: '100%', objectFit: 'cover',
+                position: 'relative', width: '100%', height: '100%', objectFit: 'cover',
                 objectPosition: '50% 25%', borderRadius: '50%',
-                boxShadow: status === 'speaking' ? '0 0 32px rgba(107,158,160,.45)' : '0 0 14px rgba(107,158,160,.15)',
-                transition: 'box-shadow .3s'
+                boxShadow: status === 'speaking'
+                  ? `0 0 ${18 + mouthOpen * 26}px rgba(107,158,160,${0.35 + mouthOpen * 0.4})`
+                  : '0 0 14px rgba(107,158,160,.15)',
+                transition: 'box-shadow 90ms linear'
               }}
             />
-            {/* Overlay de boca — posición ajustable con los controles de abajo (modo debug) */}
-            <div style={{
-              position: 'absolute', left: `${mouthPos.left}%`, top: `${mouthPos.top}%`,
-              width: '13%',
-              height: `${4 + mouthOpen * 13}%`,
-              background: showDebug ? 'rgba(230,30,30,.85)' : 'rgba(80,35,35,.55)',
-              border: showDebug ? '1px solid white' : 'none',
-              borderRadius: '50%',
-              transform: 'translate(-50%,-50%)',
-              transition: 'height 60ms linear',
-              pointerEvents: 'none'
-            }} />
-            {/* Controles de calibración — solo en modo debug */}
             {showDebug && (
               <div style={{
-                position: 'absolute', bottom: '-84px', left: '50%', transform: 'translateX(-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+                position: 'absolute', bottom: '-20px', left: '50%', transform: 'translateX(-50%)',
                 fontSize: '11px', fontFamily: 'monospace', color: '#4A7B7E', whiteSpace: 'nowrap'
               }}>
-                <div>mouthOpen: {mouthOpen.toFixed(3)} · ctx: {audioCtxRef.current?.state || 'sin crear'}</div>
-                <div>left: {mouthPos.left}% · top: {mouthPos.top}%</div>
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  <button onClick={() => setMouthPos(p => ({ ...p, top: p.top - 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>↑</button>
-                  <button onClick={() => setMouthPos(p => ({ ...p, top: p.top + 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>↓</button>
-                  <button onClick={() => setMouthPos(p => ({ ...p, left: p.left - 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>←</button>
-                  <button onClick={() => setMouthPos(p => ({ ...p, left: p.left + 1 }))} style={{ padding: '2px 8px', cursor: 'pointer' }}>→</button>
-                </div>
+                volumen: {mouthOpen.toFixed(3)} · ctx: {audioCtxRef.current?.state || 'sin crear'}
               </div>
             )}
           </div>
