@@ -76,7 +76,7 @@ export default function App() {
   const analyserRef   = useRef(null);
   const mouthRafRef   = useRef(null);
   const [mouthOpen, setMouthOpen] = useState(0); // 0 a 1 — abertura de boca en tiempo real
-  const [mouthPos, setMouthPos] = useState({ left: 50, top: 63 }); // % — ajustable en modo debug
+  const [mouthPos, setMouthPos] = useState({ left: 50, top: 43 }); // % — calibrado sobre la foto real
 
   // IMPORTANTE: los navegadores exigen crear/despertar el AudioContext dentro
   // del gesto directo del usuario (clic), no después de esperar al backend.
