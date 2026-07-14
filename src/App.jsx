@@ -674,7 +674,7 @@ export default function App() {
       {/* Modal Carta Astral */}
       {showAstro && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(74,74,70,.35)', zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => { setShowAstro(false); setChartSvg(null); }}>
-          <div style={{ background: '#FAFAF8', borderRadius: '20px', maxWidth: '380px', width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '28px 24px', border: '0.5px solid rgba(107,158,160,.25)', boxShadow: '0 12px 40px rgba(74,74,70,.18)' }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: '#FAFAF8', borderRadius: '20px', maxWidth: '640px', width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '28px 24px', border: '0.5px solid rgba(107,158,160,.25)', boxShadow: '0 12px 40px rgba(74,74,70,.18)' }} onClick={e => e.stopPropagation()}>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <span style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontStyle: 'italic', fontSize: '24px', fontWeight: 300, color: '#A0693A', letterSpacing: '.02em' }}>✧ Carta astral</span>
