@@ -236,7 +236,10 @@ export default function App() {
 
   const selectConv = async (id) => {
     setCurrentConvId(id); setShowSidebar(false); setTemporary(false);
-    try { const msgs = await api(`/conversations/${id}/messages`, {}, token); if (Array.isArray(msgs)) setMessages(msgs); } catch {}
+    try {
+      const msgs = await api(`/conversations/${id}/messages`, {}, token);
+      if (Array.isArray(msgs)) setMessages(msgs.map(m => ({ ...m, id: m.id || newMsgId() })));
+    } catch {}
   };
 
   const newConv = () => { setCurrentConvId(null); setMessages([]); setTemporary(false); tempHistRef.current = []; setShowSidebar(false); };
@@ -366,17 +369,38 @@ export default function App() {
   }, []);
 
   // ── Reproducir (o pausar/reanudar si ya es el activo) el audio de un mensaje ──
-  const toggleMessageAudio = useCallback((msg) => {
-    if (!msg.audio) return;
-    if (playingMsgIdRef.current === msg.id && audioRef.current) {
+  // Funciona tanto para respuestas de GaIA (que ya traen audio generado) como
+  // para preguntas del usuario (que no lo tienen — se genera la primera vez
+  // que se pulsa, vía /tts, y se guarda en el propio mensaje para no volver
+  // a sintetizarlo si se repite).
+  const toggleMessageAudio = useCallback(async (msg) => {
+    // Ya es el audio activo -> pausar/reanudar sin perder posición
+    if (msg.audio && playingMsgIdRef.current === msg.id && audioRef.current) {
       togglePauseAudio();
       return;
     }
-    // Es otro mensaje (o no hay nada cargado): paramos lo anterior y
-    // arrancamos este desde el principio.
-    if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
-    playAudio(msg.audio, msg.id);
-  }, [playAudio, togglePauseAudio]);
+    // Ya tiene audio (de antes) -> reproducir desde el principio
+    if (msg.audio) {
+      if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
+      playAudio(msg.audio, msg.id);
+      return;
+    }
+    // Sin audio todavía (mensaje del usuario, normalmente) -> generarlo ahora
+    if (loadingAudioId) return; // evita pedidos duplicados si ya hay uno en curso
+    unlockAudioContext();
+    setLoadingAudioId(msg.id);
+    try {
+      const data = await api('/tts', { method: 'POST', body: JSON.stringify({ text: msg.content }) }, token);
+      if (data.audio) {
+        setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, audio: data.audio } : m)));
+        if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
+        playAudio(data.audio, msg.id);
+      }
+    } catch (err) {
+      console.error('[Audio] Error generando audio bajo demanda:', err);
+    }
+    setLoadingAudioId(null);
+  }, [playAudio, togglePauseAudio, unlockAudioContext, token, loadingAudioId]);
 
   // ── Detener audio ─────────────────────────────────────────────────────────
   const stopAudio = useCallback(() => {
@@ -394,6 +418,7 @@ export default function App() {
   // ── Reproducir solo el texto seleccionado de una respuesta ───────────────
   const [selection, setSelection] = useState({ msgId: null, text: '' });
   const [selectionLoading, setSelectionLoading] = useState(false);
+  const [loadingAudioId, setLoadingAudioId] = useState(null); // id del mensaje generando audio bajo demanda
 
   const handleTextSelection = useCallback((msg) => {
     const sel = window.getSelection();
@@ -453,7 +478,7 @@ export default function App() {
       else setStatus('idle');
     } catch (err) {
       console.error(err);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Error conectando con GaIA. Intenta de nuevo.' }]);
+      setMessages(prev => [...prev, { id: newMsgId(), role: 'assistant', content: 'Error conectando con GaIA. Intenta de nuevo.' }]);
       setStatus('idle');
     }
     setIsLoading(false); setStatusText('');
@@ -510,7 +535,7 @@ export default function App() {
       addLog(`ONEND → "${finalText}"`);
       setStatus('idle');
       if (finalText) {
-        setMessages(prev => [...prev, { role: 'user', content: finalText }]);
+        setMessages(prev => [...prev, { id: newMsgId(), role: 'user', content: finalText }]);
         callGaIA(finalText);
       } else {
         setStatusText('');
@@ -534,7 +559,7 @@ export default function App() {
     const t = textInput.trim();
     if (!t || isLoading) return;
     unlockAudioContext(); // ← dentro del gesto de clic, antes de esperar al backend
-    setMessages(prev => [...prev, { role: 'user', content: t }]);
+    setMessages(prev => [...prev, { id: newMsgId(), role: 'user', content: t }]);
     setTextInput(''); callGaIA(t);
   }, [textInput, isLoading, callGaIA, unlockAudioContext]);
 
@@ -678,23 +703,31 @@ export default function App() {
               {msg.role === 'assistant' && <span style={{ fontFamily: "'Cormorant Garamond',serif", fontStyle: 'italic', fontSize: '11px', color: '#4A7B7E', marginTop: '7px', flexShrink: 0, opacity: .5 }}>G</span>}
               <div style={{ display: 'flex', flexDirection: 'column', maxWidth: 'min(80%,480px)', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div
-                  onMouseUp={() => msg.role === 'assistant' && handleTextSelection(msg)}
-                  onTouchEnd={() => msg.role === 'assistant' && handleTextSelection(msg)}
+                  onMouseUp={() => msg.id && handleTextSelection(msg)}
+                  onTouchEnd={() => msg.id && handleTextSelection(msg)}
                   style={{ padding: '10px 14px', borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px', background: msg.role === 'user' ? 'rgba(201,149,107,.12)' : 'rgba(107,158,160,.1)', border: '0.5px solid ' + (msg.role === 'user' ? 'rgba(201,149,107,.2)' : 'rgba(107,158,160,.18)'), fontSize: '14px', lineHeight: '1.65', color: msg.role === 'user' ? '#6B4E32' : '#4A4A46' }}
                 >
                   {msg.content}
                 </div>
-                {msg.role === 'assistant' && msg.audio && (
+                {msg.id && (
                   <button
                     onClick={() => toggleMessageAudio(msg)}
+                    disabled={loadingAudioId === msg.id}
                     style={{
-                      marginTop: '3px', marginLeft: '4px', background: 'none', border: 'none', cursor: 'pointer',
-                      fontSize: '13px', color: '#4A7B7E', opacity: .55, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '3px'
+                      marginTop: '3px', marginLeft: '4px', background: 'none', border: 'none',
+                      cursor: loadingAudioId === msg.id ? 'default' : 'pointer',
+                      fontSize: '13px', color: msg.role === 'user' ? '#A0693A' : '#4A7B7E', opacity: .55, padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '3px'
                     }}
                   >
-                    {playingMsgId === msg.id && status === 'speaking' ? '⏸' : '▶'}
+                    {loadingAudioId === msg.id ? '⏳' : playingMsgId === msg.id && status === 'speaking' ? '⏸' : '▶'}
                     <span style={{ fontSize: '10px', fontStyle: 'italic' }}>
-                      {playingMsgId === msg.id && status === 'speaking' ? 'pausar' : playingMsgId === msg.id && status === 'paused' ? 'reanudar' : 'escuchar de nuevo'}
+                      {loadingAudioId === msg.id
+                        ? 'generando audio...'
+                        : playingMsgId === msg.id && status === 'speaking'
+                          ? 'pausar'
+                          : playingMsgId === msg.id && status === 'paused'
+                            ? 'reanudar'
+                            : msg.audio ? 'escuchar de nuevo' : 'escuchar'}
                     </span>
                   </button>
                 )}
