@@ -143,7 +143,8 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
   const fileInput     = useRef(null);
   // CORRECCIÓN TDZ: handleUpload se guarda en un ref para que startRecording
   // pueda referenciarlo sin depender del orden de declaración de const.
-  const handleUploadRef = useRef(null);
+  const handleUploadRef  = useRef(null);
+  const stopRecordingRef = useRef(null);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -193,10 +194,14 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
     }
   }, [apiBase, authToken]);
 
-  // Mantener el ref sincronizado con el callback más reciente
+  // Mantener los refs sincronizados con los callbacks más recientes
   useEffect(() => {
     handleUploadRef.current = handleUpload;
   }, [handleUpload]);
+
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
 
   // ── startRecording usa el ref para evitar cualquier dependencia de orden ─────
   const startRecording = useCallback(async () => {
@@ -225,7 +230,7 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
         setElapsed(prev => {
           const next = prev + 1;
           if (next === WARN_SECONDS) setWarned(true);
-          if (next >= MAX_SECONDS) stopRecording();
+          if (next >= MAX_SECONDS) stopRecordingRef.current?.();
           return next;
         });
       }, 1000);
