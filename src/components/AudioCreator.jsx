@@ -195,15 +195,7 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
   }, [apiBase, authToken]);
 
   // Mantener los refs sincronizados con los callbacks más recientes
-  useEffect(() => {
-    handleUploadRef.current = handleUpload;
-  }, [handleUpload]);
-
-  useEffect(() => {
-    stopRecordingRef.current = stopRecording;
-  }, [stopRecording]);
-
-  // ── startRecording usa el ref para evitar cualquier dependencia de orden ─────
+  // ── stopRecording declarado antes de cualquier referencia ─────────────────
   const stopRecording = useCallback(() => {
     clearInterval(timerRef.current);
     clearInterval(pulseRef.current);
@@ -213,6 +205,16 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
     }
   }, []);
 
+  // Mantener los refs sincronizados con los callbacks más recientes
+  useEffect(() => {
+    handleUploadRef.current = handleUpload;
+  }, [handleUpload]);
+
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
+
+  // ── startRecording usa el ref para evitar cualquier dependencia de orden ─────
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
