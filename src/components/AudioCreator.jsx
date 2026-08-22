@@ -204,6 +204,15 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
   }, [stopRecording]);
 
   // ── startRecording usa el ref para evitar cualquier dependencia de orden ─────
+  const stopRecording = useCallback(() => {
+    clearInterval(timerRef.current);
+    clearInterval(pulseRef.current);
+    setPulse(false);
+    if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") {
+      mediaRecorder.current.stop();
+    }
+  }, []);
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -238,15 +247,6 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
       pulseRef.current = setInterval(() => setPulse(p => !p), PULSE_MS);
     } catch {
       alert("No se pudo acceder al micrófono. Comprueba los permisos del navegador.");
-    }
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    clearInterval(timerRef.current);
-    clearInterval(pulseRef.current);
-    setPulse(false);
-    if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") {
-      mediaRecorder.current.stop();
     }
   }, []);
 
