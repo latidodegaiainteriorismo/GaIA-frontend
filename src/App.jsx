@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect, useRef, useCallback } from "react";
 import gaiaAvatar from './assets/gaia-avatar.png';
+import AudioCreator from './components/AudioCreator';
 
 const API_URL    = process.env.REACT_APP_API_URL    || 'https://gaia-2py8.onrender.com';
 const GOOGLE_CID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
@@ -20,6 +21,8 @@ const apiText = (path, token = null) => {
 export default function App() {
   const [token,    setToken]    = useState(() => localStorage.getItem('gaia_token'));
   const [username, setUsername] = useState(() => localStorage.getItem('gaia_username') || '');
+  const [isCreator, setIsCreator] = useState(() => localStorage.getItem('gaia_is_creator') === 'true');
+  const [showAudioRecorder, setShowAudioRecorder] = useState(false);
   const [authErr,  setAuthErr]  = useState('');
   const googleBtnRef = useRef(null);
 
@@ -108,7 +111,9 @@ export default function App() {
       if (data.error) { setAuthErr(data.error); return; }
       localStorage.setItem('gaia_token', data.token);
       localStorage.setItem('gaia_username', data.username);
+      localStorage.setItem('gaia_is_creator', data.is_creator ? 'true' : 'false');
       setToken(data.token); setUsername(data.username);
+      setIsCreator(!!data.is_creator);
     } catch { setAuthErr('Error de conexión. Intenta de nuevo.'); }
   }, []);
 
@@ -127,7 +132,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try { await api('/auth/logout', { method: 'POST' }, token); } catch {}
-    localStorage.removeItem('gaia_token'); localStorage.removeItem('gaia_username');
+    localStorage.removeItem('gaia_token'); localStorage.removeItem('gaia_username'); localStorage.removeItem('gaia_is_creator');
     setToken(null); setUsername(''); setConversations([]); setMessages([]); setCurrentConvId(null);
     setBirthChart(null); setShowAstro(false); setChartSvg(null); setChartSvgError('');
     setCharts([]); setSelectedPerson('yo'); setShowAddPerson(false);
@@ -794,6 +799,24 @@ export default function App() {
                 </>
               )}
 
+              {/* Botón grabar audio (solo creator) */}
+              {isCreator && (
+                <button
+                  onClick={() => setShowAudioRecorder(true)}
+                  title="Grabar audio para GaIA"
+                  style={{
+                    width: '44px', height: '44px', borderRadius: '50%', border: 'none',
+                    cursor: 'pointer', color: 'white', fontSize: '16px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(180,100,60,.82)',
+                    boxShadow: '0 2px 10px rgba(180,100,60,.3)',
+                    transition: 'all .25s', outline: 'none',
+                  }}
+                >
+                  ●
+                </button>
+              )}
+
               {/* Botón micrófono */}
               <button onClick={status === 'listening' ? stopListening : startListening} disabled={micDisabled}
                 style={{ width: '70px', height: '70px', borderRadius: '50%', border: 'none', cursor: micDisabled ? 'not-allowed' : 'pointer', color: 'white', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .25s', outline: 'none', background: status === 'listening' ? 'rgba(201,149,107,.9)' : micDisabled ? 'rgba(74,74,70,.1)' : 'rgba(107,158,160,.88)', boxShadow: status === 'listening' ? '0 0 0 8px rgba(201,149,107,.15),0 0 0 16px rgba(201,149,107,.07)' : micDisabled ? 'none' : '0 2px 16px rgba(107,158,160,.28)' }}>
@@ -985,6 +1008,14 @@ export default function App() {
 
           </div>
         </div>
+      )}
+      {/* Modal grabación de audio (solo creator) */}
+      {isCreator && showAudioRecorder && (
+        <AudioCreator
+          apiBase={API_URL}
+          authToken={token}
+          onClose={() => setShowAudioRecorder(false)}
+        />
       )}
     </div>
   );
