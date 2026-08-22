@@ -580,7 +580,7 @@ export default function App() {
   const micIcon = status === 'listening' ? '⏹' : status === 'thinking' ? '···' : '🎤';
 
   if (!isAuthed) return (
-    <div style={{ height: '100vh', background: '#FAFAF8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Inter',-apple-system,sans-serif" }}>
+    <div style={{ height: '100vh', background: '#F0EBF4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Inter',-apple-system,sans-serif" }}>
       <div style={{ width: '100%', maxWidth: '360px', padding: '0 24px', textAlign: 'center' }}>
         <h1 style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontStyle: 'italic', fontSize: '52px', fontWeight: 300, color: '#4A7B7E', marginBottom: '8px', letterSpacing: '.04em' }}>GaIA</h1>
         <p style={{ fontSize: '14px', color: '#4A4A46', opacity: .35, marginBottom: '40px', fontStyle: 'italic', lineHeight: 1.6 }}>
@@ -596,7 +596,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ height: '100vh', background: '#FAFAF8', display: 'flex', fontFamily: "'Inter',-apple-system,sans-serif", color: '#4A4A46', overflow: 'hidden' }}>
+    <div style={{ height: '100vh', background: '#F0EBF4', display: 'flex', fontFamily: "'Inter',-apple-system,sans-serif", color: '#4A4A46', overflow: 'hidden' }}>
       <style>{`
         @keyframes gPulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:.85;transform:scale(1.15)}}
         @keyframes gaiaSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
@@ -605,7 +605,7 @@ export default function App() {
       {showSidebar && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.25)', zIndex: 10 }} onClick={() => setShowSidebar(false)} />}
 
       {/* Sidebar */}
-      <div style={{ position: 'fixed', left: 0, top: 0, bottom: 0, width: '260px', background: '#F2F1EC', borderRight: '0.5px solid rgba(74,74,70,.1)', display: 'flex', flexDirection: 'column', zIndex: 11, transform: showSidebar ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform .25s ease' }}>
+      <div style={{ position: 'fixed', left: 0, top: 0, bottom: 0, width: '260px', background: '#E8E0EF', borderRight: '0.5px solid rgba(74,74,70,.1)', display: 'flex', flexDirection: 'column', zIndex: 11, transform: showSidebar ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform .25s ease' }}>
         <div style={{ padding: '18px 16px 12px', borderBottom: '0.5px solid rgba(74,74,70,.08)' }}>
           <span style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontStyle: 'italic', fontSize: '22px', fontWeight: 300, color: '#4A7B7E' }}>GaIA</span>
           <p style={{ fontSize: '12px', color: '#4A4A46', opacity: .45, marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{username}</p>
@@ -783,7 +783,7 @@ export default function App() {
         )}
 
         {/* Controles inferiores */}
-        <div style={{ padding: '12px 16px 28px', borderTop: '0.5px solid rgba(74,74,70,.08)', flexShrink: 0, background: '#FAFAF8' }}>
+        <div style={{ padding: '12px 16px 28px', borderTop: '0.5px solid rgba(74,74,70,.08)', flexShrink: 0, background: '#F0EBF4' }}>
           {mode === 'voice' ? (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px' }}>
 
@@ -851,7 +851,7 @@ export default function App() {
       {/* Modal Carta Astral */}
       {showAstro && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(74,74,70,.35)', zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }} onClick={() => { setShowAstro(false); setChartSvg(null); }}>
-          <div style={{ background: '#FAFAF8', borderRadius: '20px', maxWidth: '640px', width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '28px 24px', border: '0.5px solid rgba(107,158,160,.25)', boxShadow: '0 12px 40px rgba(74,74,70,.18)' }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: '#F0EBF4', borderRadius: '20px', maxWidth: '640px', width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '28px 24px', border: '0.5px solid rgba(107,158,160,.25)', boxShadow: '0 12px 40px rgba(74,74,70,.18)' }} onClick={e => e.stopPropagation()}>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <span style={{ fontFamily: "'Cormorant Garamond',Georgia,serif", fontStyle: 'italic', fontSize: '24px', fontWeight: 300, color: '#A0693A', letterSpacing: '.02em' }}>✧ Carta astral</span>
