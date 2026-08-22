@@ -368,6 +368,17 @@ export default function App() {
     else { audioRef.current.pause(); }
   }, []);
 
+  // ── Estado de selección y audio bajo demanda ────────────────────────────
+  // CORRECCIÓN (22-ago-2026): loadingAudioId se movió ANTES de
+  // toggleMessageAudio porque se usa dentro de ese callback. En el App.jsx
+  // anterior estaba declarado después (línea 421), lo que causaba un
+  // Temporal Dead Zone (TDZ) en el bundle minificado de producción:
+  // "Cannot access 'en' before initialization" — error que rompía la app
+  // completamente en producción aunque no era visible en desarrollo.
+  const [selection, setSelection] = useState({ msgId: null, text: '' });
+  const [selectionLoading, setSelectionLoading] = useState(false);
+  const [loadingAudioId, setLoadingAudioId] = useState(null);
+
   // ── Reproducir (o pausar/reanudar si ya es el activo) el audio de un mensaje ──
   // Funciona tanto para respuestas de GaIA (que ya traen audio generado) como
   // para preguntas del usuario (que no lo tienen — se genera la primera vez
@@ -416,10 +427,6 @@ export default function App() {
   }, []);
 
   // ── Reproducir solo el texto seleccionado de una respuesta ───────────────
-  const [selection, setSelection] = useState({ msgId: null, text: '' });
-  const [selectionLoading, setSelectionLoading] = useState(false);
-  const [loadingAudioId, setLoadingAudioId] = useState(null); // id del mensaje generando audio bajo demanda
-
   const handleTextSelection = useCallback((msg) => {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : '';
