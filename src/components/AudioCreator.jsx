@@ -125,7 +125,7 @@ const S = {
   meta: { fontSize: "12px", color: "#6a5540", display: "flex", gap: "16px" },
 };
 
-export default function AudioCreator({ apiBase, authToken, onClose }) {
+export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady }) {
   const [phase, setPhase]             = useState("idle");
   const [elapsed, setElapsed]         = useState(0);
   const [pulse, setPulse]             = useState(false);
@@ -258,6 +258,11 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
     handleUpload(file, file.name);
   }, [handleUpload]);
 
+  // CORRECCIÓN (25-ago-2026): "Guardar" ahora completa el flujo entero —
+  // guarda el título, avisa a App.jsx con la transcripción completa (para
+  // que la incorpore al chat exactamente como una pregunta de texto o voz),
+  // y cierra el modal. Antes solo guardaba el título y se quedaba en la
+  // misma pantalla, sin ninguna señal de que había terminado.
   const saveTitle = useCallback(async () => {
     if (!result?.id || !editTitle.trim()) return;
     setSavingTitle(true);
@@ -272,7 +277,15 @@ export default function AudioCreator({ apiBase, authToken, onClose }) {
       });
     } catch (_) {}
     setSavingTitle(false);
-  }, [apiBase, authToken, result, editTitle]);
+
+    if (onAudioReady) {
+      onAudioReady({
+        transcript: result.transcript_full || result.transcript_preview || "",
+        title: editTitle.trim(),
+      });
+    }
+    onClose?.();
+  }, [apiBase, authToken, result, editTitle, onAudioReady, onClose]);
 
   const reset = () => {
     setPhase("idle"); setElapsed(0); setWarned(false);
