@@ -51,6 +51,23 @@ const S = {
     background: "none", border: "none", color: "#8a7055", cursor: "pointer",
     fontSize: "22px", lineHeight: 1, padding: "2px 6px",
   },
+  // Badge persistente con el nº de audios ya en cola — visible en cualquier
+  // fase (idle, grabando, subiendo, resultado), para que nunca haya duda
+  // de cuántos se han aceptado hasta el momento.
+  queueBadge: {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+    background: "rgba(196,144,80,0.14)", border: "1px solid rgba(196,144,80,0.3)",
+    borderRadius: "20px", padding: "6px 14px", fontSize: "12px", color: "#d4ae78",
+    alignSelf: "center",
+  },
+  // Mensaje flash de confirmación tras aceptar/descartar — aparece y se
+  // autolimpia, no bloquea ninguna otra interacción.
+  flash: (tone) => ({
+    fontSize: "12px", textAlign: "center", padding: "7px 12px", borderRadius: "10px",
+    background: tone === 'discard' ? 'rgba(200,90,70,0.14)' : 'rgba(120,170,110,0.14)',
+    color: tone === 'discard' ? '#e0a080' : '#a8d0a0',
+    border: '1px solid ' + (tone === 'discard' ? 'rgba(200,90,70,0.28)' : 'rgba(120,170,110,0.28)'),
+  }),
   recorderZone: {
     display: "flex", flexDirection: "column", alignItems: "center", gap: "16px",
   },
@@ -135,6 +152,21 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
   const [result, setResult]           = useState(null);
   const [editTitle, setEditTitle]     = useState("");
   const [savingTitle, setSavingTitle] = useState(false);
+  // Cola de audios aceptados en esta sesión de grabación (vía "Grabar otro"),
+  // pendientes de enviarse todos juntos al chat cuando se pulse "Guardar"
+  // definitivo. Cada entrada: { id, transcript, title }.
+  const [queue, setQueue] = useState([]);
+  // Mensaje breve de confirmación tras aceptar/descartar un audio — se
+  // autolimpia a los 2.5s. Independiente del "phase" para que no
+  // interfiera con la transición idle/recording/uploading/done.
+  const [flashMsg, setFlashMsg] = useState(null); // { text, tone: 'ok'|'discard' }
+  const flashTimerRef = useRef(null);
+
+  const showFlash = (text, tone = 'ok') => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    setFlashMsg({ text, tone });
+    flashTimerRef.current = setTimeout(() => setFlashMsg(null), 2500);
+  };
 
   const mediaRecorder = useRef(null);
   const audioChunks   = useRef([]);
@@ -258,34 +290,87 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
     handleUpload(file, file.name);
   }, [handleUpload]);
 
-  // CORRECCIÓN (25-ago-2026): "Guardar" ahora completa el flujo entero —
-  // guarda el título, avisa a App.jsx con la transcripción completa (para
-  // que la incorpore al chat exactamente como una pregunta de texto o voz),
-  // y cierra el modal. Antes solo guardaba el título y se quedaba en la
-  // misma pantalla, sin ninguna señal de que había terminado.
-  const saveTitle = useCallback(async () => {
-    if (!result?.id || !editTitle.trim()) return;
-    setSavingTitle(true);
+  // ── Persistir SOLO el título (sin decidir nada sobre el destino del audio) ──
+  // Se usa tanto en onBlur del campo de texto como paso previo a las tres
+  // acciones de abajo, para que el título editado quede guardado siempre.
+  const persistTitle = useCallback(async (id, title) => {
+    if (!id || !title.trim()) return;
     try {
-      await fetch(`${apiBase}/audio/${result.id}/title`, {
+      await fetch(`${apiBase}/audio/${id}/title`, {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${authToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ title: editTitle.trim() }),
+        body: JSON.stringify({ title: title.trim() }),
       });
     } catch (_) {}
+  }, [apiBase, authToken]);
+
+  const saveTitle = useCallback(() => {
+    if (result?.id) persistTitle(result.id, editTitle);
+  }, [result, editTitle, persistTitle]);
+
+  // ── "No guardar": descarta el audio actual (ya estaba subido al backend
+  // desde que terminó de procesarse, así que hay que borrarlo explícitamente)
+  // y vuelve a la pantalla de grabación. No toca la cola — los audios ya
+  // aceptados con "Grabar otro" anteriormente se mantienen intactos.
+  const discardCurrent = useCallback(async () => {
+    if (result?.id) {
+      try {
+        await fetch(`${apiBase}/audio/${result.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      } catch (_) {}
+    }
+    const quedan = queue.length;
+    showFlash(
+      quedan > 0
+        ? `✕ Descartado — ${quedan} audio${quedan > 1 ? 's' : ''} en cola. Puedes grabar otro.`
+        : '✕ Descartado — puedes grabar otro cuando quieras.',
+      'discard'
+    );
+    reset();
+  }, [apiBase, authToken, result, queue.length]);
+
+  // ── "Grabar otro": acepta el audio actual (queda en la cola, con su
+  // título ya persistido) y vuelve a la pantalla de grabación sin cerrar
+  // el modal. No se envía al chat todavía — eso solo ocurre en "Guardar".
+  const acceptAndRecordAnother = useCallback(async () => {
+    if (!result?.id) return;
+    setSavingTitle(true);
+    await persistTitle(result.id, editTitle);
+    setSavingTitle(false);
+    const nuevoTotal = queue.length + 1;
+    setQueue(prev => [...prev, {
+      id: result.id,
+      transcript: result.transcript_full || result.transcript_preview || "",
+      title: editTitle.trim(),
+    }]);
+    showFlash(`✓ Guardado — ${nuevoTotal} audio${nuevoTotal > 1 ? 's' : ''} en cola`, 'ok');
+    reset();
+  }, [result, editTitle, persistTitle, queue.length]);
+
+  // ── "Guardar" definitivo: acepta el audio actual, añade TODA la cola
+  // acumulada (incluido este) y la envía entera a App.jsx en un solo aviso
+  // — App.jsx la procesa en orden, una pregunta tras otra, igual que si
+  // se hubieran escrito o dictado por voz una detrás de otra.
+  const finalSave = useCallback(async () => {
+    if (!result?.id || !editTitle.trim()) return;
+    setSavingTitle(true);
+    await persistTitle(result.id, editTitle);
     setSavingTitle(false);
 
-    if (onAudioReady) {
-      onAudioReady({
-        transcript: result.transcript_full || result.transcript_preview || "",
-        title: editTitle.trim(),
-      });
-    }
+    const fullQueue = [...queue, {
+      id: result.id,
+      transcript: result.transcript_full || result.transcript_preview || "",
+      title: editTitle.trim(),
+    }];
+
+    if (onAudioReady) onAudioReady(fullQueue);
     onClose?.();
-  }, [apiBase, authToken, result, editTitle, onAudioReady, onClose]);
+  }, [result, editTitle, queue, persistTitle, onAudioReady, onClose]);
 
   const reset = () => {
     setPhase("idle"); setElapsed(0); setWarned(false);
@@ -308,6 +393,19 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
           </div>
           <button style={S.btnClose} onClick={onClose}>×</button>
         </div>
+
+        {/* Badge persistente: cuántos audios llevas ya aceptados en esta
+            sesión de grabación, visible en cualquier fase del flujo. */}
+        {queue.length > 0 && (
+          <div style={S.queueBadge}>
+            📦 {queue.length} audio{queue.length > 1 ? 's' : ''} guardado{queue.length > 1 ? 's' : ''} en cola
+          </div>
+        )}
+
+        {/* Confirmación temporal tras aceptar o descartar el último audio */}
+        {flashMsg && (
+          <div style={S.flash(flashMsg.tone)}>{flashMsg.text}</div>
+        )}
 
         {(phase === "idle" || isRecording) && (
           <>
@@ -379,11 +477,21 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
             {result.transcript_preview && (
               <p style={S.previewText}>{result.transcript_preview}</p>
             )}
+            {/* Tres acciones: Guardar (cierra y envía toda la cola al chat),
+                No guardar (descarta este audio, se borra del backend) y
+                Grabar otro (acepta este audio en la cola y graba uno más) */}
             <div style={S.btnRow}>
-              <button style={S.btnPrimary} onClick={saveTitle} disabled={savingTitle}>
-                {savingTitle ? "Guardando..." : "✓ Guardar"}
+              <button style={S.btnPrimary} onClick={finalSave} disabled={savingTitle}>
+                {savingTitle ? "Guardando..." : queue.length > 0 ? `✓ Guardar (${queue.length + 1})` : "✓ Guardar"}
               </button>
-              <button style={S.btnSecondary} onClick={reset}>Grabar otro</button>
+              <button style={S.btnSecondary} onClick={acceptAndRecordAnother} disabled={savingTitle}>
+                Grabar otro
+              </button>
+            </div>
+            <div style={S.btnRow}>
+              <button style={S.btnDanger} onClick={discardCurrent} disabled={savingTitle}>
+                ✕ No guardar
+              </button>
             </div>
           </div>
         )}
