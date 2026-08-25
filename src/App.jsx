@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import gaiaAvatar from './assets/gaia-avatar.png';
 import AudioCreator from './components/AudioCreator';
+import AudioLibrary from './components/AudioLibrary';
 
 const API_URL    = process.env.REACT_APP_API_URL    || 'https://gaia-2py8.onrender.com';
 const GOOGLE_CID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
@@ -23,6 +24,7 @@ export default function App() {
   const [username, setUsername] = useState(() => localStorage.getItem('gaia_username') || '');
   const [isCreator, setIsCreator] = useState(() => localStorage.getItem('gaia_is_creator') === 'true');
   const [showAudioRecorder, setShowAudioRecorder] = useState(false);
+  const [showAudioLibrary, setShowAudioLibrary] = useState(false);
   const [authErr,  setAuthErr]  = useState('');
   const googleBtnRef = useRef(null);
 
@@ -575,14 +577,20 @@ export default function App() {
     setTextInput(''); callGaIA(t);
   }, [textInput, isLoading, callGaIA, unlockAudioContext]);
 
-  // ── Audio grabado por el creator: se incorpora como pregunta, igual que
-  // un mensaje escrito o hablado — mismo patrón que sendText/startListening.
-  const handleAudioReady = useCallback(({ transcript }) => {
-    const t = (transcript || '').trim();
-    if (!t) return;
+  // ── Audio(s) grabados por el creator: se incorporan como pregunta, igual
+  // que un mensaje escrito o hablado — mismo patrón que sendText/startListening.
+  // Recibe la COLA completa (uno o más audios aceptados con "Grabar otro" +
+  // el guardado con "Guardar") y los procesa en orden, uno detrás de otro,
+  // esperando la respuesta de GaIA antes de enviar el siguiente — como si
+  // el usuario hubiera hecho varias preguntas seguidas.
+  const handleAudioReady = useCallback(async (queue) => {
     setShowAudioRecorder(false);
-    setMessages(prev => [...prev, { id: newMsgId(), role: 'user', content: t }]);
-    callGaIA(t);
+    for (const item of queue) {
+      const t = (item.transcript || '').trim();
+      if (!t) continue;
+      setMessages(prev => [...prev, { id: newMsgId(), role: 'user', content: t }]);
+      await callGaIA(t);
+    }
   }, [callGaIA]);
 
   const toggleMode = () => { if (status === 'listening') stopListening(); setMode(m => m === 'voice' ? 'text' : 'voice'); };
@@ -827,6 +835,23 @@ export default function App() {
                 </button>
               )}
 
+              {/* Botón "Mis audios" — biblioteca de grabaciones (solo creator) */}
+              {isCreator && (
+                <button
+                  onClick={() => setShowAudioLibrary(true)}
+                  title="Mis audios"
+                  style={{
+                    width: '44px', height: '44px', borderRadius: '50%',
+                    border: '1.5px solid rgba(180,100,60,.5)', background: 'transparent',
+                    cursor: 'pointer', color: '#c49050', fontSize: '16px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all .25s', outline: 'none',
+                  }}
+                >
+                  📼
+                </button>
+              )}
+
               {/* Botón micrófono */}
               <button onClick={status === 'listening' ? stopListening : startListening} disabled={micDisabled}
                 style={{ width: '70px', height: '70px', borderRadius: '50%', border: 'none', cursor: micDisabled ? 'not-allowed' : 'pointer', color: 'white', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .25s', outline: 'none', background: status === 'listening' ? 'rgba(201,149,107,.9)' : micDisabled ? 'rgba(74,74,70,.1)' : 'rgba(107,158,160,.88)', boxShadow: status === 'listening' ? '0 0 0 8px rgba(201,149,107,.15),0 0 0 16px rgba(201,149,107,.07)' : micDisabled ? 'none' : '0 2px 16px rgba(107,158,160,.28)' }}>
@@ -1026,6 +1051,13 @@ export default function App() {
           authToken={token}
           onClose={() => setShowAudioRecorder(false)}
           onAudioReady={handleAudioReady}
+        />
+      )}
+      {isCreator && showAudioLibrary && (
+        <AudioLibrary
+          apiBase={API_URL}
+          authToken={token}
+          onClose={() => setShowAudioLibrary(false)}
         />
       )}
     </div>
