@@ -575,6 +575,16 @@ export default function App() {
     setTextInput(''); callGaIA(t);
   }, [textInput, isLoading, callGaIA, unlockAudioContext]);
 
+  // ── Audio grabado por el creator: se incorpora como pregunta, igual que
+  // un mensaje escrito o hablado — mismo patrón que sendText/startListening.
+  const handleAudioReady = useCallback(({ transcript }) => {
+    const t = (transcript || '').trim();
+    if (!t) return;
+    setShowAudioRecorder(false);
+    setMessages(prev => [...prev, { id: newMsgId(), role: 'user', content: t }]);
+    callGaIA(t);
+  }, [callGaIA]);
+
   const toggleMode = () => { if (status === 'listening') stopListening(); setMode(m => m === 'voice' ? 'text' : 'voice'); };
   const micDisabled = status === 'thinking' || isLoading;
   const micIcon = status === 'listening' ? '⏹' : status === 'thinking' ? '···' : '🎤';
@@ -1015,6 +1025,7 @@ export default function App() {
           apiBase={API_URL}
           authToken={token}
           onClose={() => setShowAudioRecorder(false)}
+          onAudioReady={handleAudioReady}
         />
       )}
     </div>
