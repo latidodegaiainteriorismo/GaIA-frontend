@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import gaiaAvatar from './assets/gaia-avatar.png';
 import AudioCreator from './components/AudioCreator';
 import AudioLibrary from './components/AudioLibrary';
+import LearningsPanel from './components/LearningsPanel';
 
 const API_URL    = process.env.REACT_APP_API_URL    || 'https://gaia-2py8.onrender.com';
 const GOOGLE_CID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
@@ -25,6 +26,7 @@ export default function App() {
   const [isCreator, setIsCreator] = useState(() => localStorage.getItem('gaia_is_creator') === 'true');
   const [showAudioRecorder, setShowAudioRecorder] = useState(false);
   const [showAudioLibrary, setShowAudioLibrary] = useState(false);
+  const [showLearnings, setShowLearnings] = useState(false);
   const [authErr,  setAuthErr]  = useState('');
   const googleBtnRef = useRef(null);
 
@@ -852,6 +854,23 @@ export default function App() {
                 </button>
               )}
 
+              {/* Botón "Aprendizajes" — Estructura Basal + conocimiento vivo (solo creator) */}
+              {isCreator && (
+                <button
+                  onClick={() => setShowLearnings(true)}
+                  title="Aprendizajes de GaIA"
+                  style={{
+                    width: '44px', height: '44px', borderRadius: '50%',
+                    border: '1.5px solid rgba(180,100,60,.5)', background: 'transparent',
+                    cursor: 'pointer', color: '#c49050', fontSize: '16px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all .25s', outline: 'none',
+                  }}
+                >
+                  🧬
+                </button>
+              )}
+
               {/* Botón micrófono */}
               <button onClick={status === 'listening' ? stopListening : startListening} disabled={micDisabled}
                 style={{ width: '70px', height: '70px', borderRadius: '50%', border: 'none', cursor: micDisabled ? 'not-allowed' : 'pointer', color: 'white', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .25s', outline: 'none', background: status === 'listening' ? 'rgba(201,149,107,.9)' : micDisabled ? 'rgba(74,74,70,.1)' : 'rgba(107,158,160,.88)', boxShadow: status === 'listening' ? '0 0 0 8px rgba(201,149,107,.15),0 0 0 16px rgba(201,149,107,.07)' : micDisabled ? 'none' : '0 2px 16px rgba(107,158,160,.28)' }}>
@@ -1058,6 +1077,13 @@ export default function App() {
           apiBase={API_URL}
           authToken={token}
           onClose={() => setShowAudioLibrary(false)}
+        />
+      )}
+      {isCreator && showLearnings && (
+        <LearningsPanel
+          apiBase={API_URL}
+          authToken={token}
+          onClose={() => setShowLearnings(false)}
         />
       )}
     </div>
