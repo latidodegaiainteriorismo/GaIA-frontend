@@ -92,7 +92,15 @@ const S = {
   },
 };
 
-export default function LearningsPanel({ apiBase, authToken, onClose }) {
+export default function LearningsPanel({ apiBase, authToken, onClose, onUnauthorized }) {
+  // En una ref para que cambiar la función no recree los callbacks de carga.
+  const onUnauthorizedRef = useRef(onUnauthorized);
+  onUnauthorizedRef.current = onUnauthorized;
+  const parseJson = useCallback((r) => {
+    if (r.status === 401) onUnauthorizedRef.current?.();
+    return r.json();
+  }, []);
+
   const [tab, setTab] = useState('basal'); // 'basal' | 'knowledge'
   const [basalNotes, setBasalNotes] = useState([]);
   const [knowledgeItems, setKnowledgeItems] = useState([]);
@@ -104,6 +112,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${authToken}` }), [authToken]);
 
   const showError = useCallback((status) => {
+    if (status === 401) onUnauthorizedRef.current?.();
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     const text = status === 401
       ? 'Tu sesión ha caducado — vuelve a iniciar sesión para guardar cambios.'
@@ -115,11 +124,11 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
   const loadBasal = useCallback(() => {
     setLoading(true);
     fetch(`${apiBase}/learnings/basal`, { headers: authHeaders })
-      .then(r => r.json())
+      .then(parseJson)
       .then(data => setBasalNotes(data.notes || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [apiBase, authHeaders]);
+  }, [apiBase, authHeaders, parseJson]);
 
   const loadKnowledge = useCallback(() => {
     setLoading(true);
@@ -127,11 +136,11 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       ? `${apiBase}/learnings/knowledge?category=${encodeURIComponent(catFilter)}`
       : `${apiBase}/learnings/knowledge`;
     fetch(url, { headers: authHeaders })
-      .then(r => r.json())
+      .then(parseJson)
       .then(data => setKnowledgeItems(data.items || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [apiBase, authHeaders, catFilter]);
+  }, [apiBase, authHeaders, catFilter, parseJson]);
 
   useEffect(() => {
     if (tab === 'basal') loadBasal();

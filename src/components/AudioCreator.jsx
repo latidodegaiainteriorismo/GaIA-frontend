@@ -145,7 +145,9 @@ const S = {
   targetFilename: { fontSize: "12px", color: "#8a7055", textAlign: "center", fontStyle: "italic" },
 };
 
-export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady }) {
+export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady, onUnauthorized }) {
+  const onUnauthorizedRef = useRef(onUnauthorized);
+  onUnauthorizedRef.current = onUnauthorized;
   const [phase, setPhase]             = useState("idle");
   const [elapsed, setElapsed]         = useState(0);
   const [pulse, setPulse]             = useState(false);
@@ -218,6 +220,7 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
       setProgressMsg("Generando título y chunks...");
 
       if (!res.ok) {
+        if (res.status === 401) onUnauthorizedRef.current?.();
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `Error ${res.status}`);
       }

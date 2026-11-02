@@ -8,10 +8,17 @@ import LearningsPanel from './components/LearningsPanel';
 const API_URL    = process.env.REACT_APP_API_URL    || 'https://gaia-2py8.onrender.com';
 const GOOGLE_CID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
+// Lo asigna <App/>: se llama cuando el backend responde 401 a una petición con
+// sesión (token caducado) para volver al login con un aviso claro.
+let onUnauthorized = null;
+
 const api = (path, opts = {}, token = null) => {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  return fetch(`${API_URL}${path}`, { ...opts, headers }).then(r => r.json());
+  return fetch(`${API_URL}${path}`, { ...opts, headers }).then(r => {
+    if (r.status === 401 && token && path !== '/auth/logout') onUnauthorized?.();
+    return r.json();
+  });
 };
 
 const apiText = (path, token = null) => {
@@ -134,13 +141,25 @@ export default function App() {
     document.head.appendChild(script);
   }, [isAuthed, handleGoogleResponse]);
 
-  const handleLogout = async () => {
-    try { await api('/auth/logout', { method: 'POST' }, token); } catch {}
+  const clearSession = (msg = '') => {
     localStorage.removeItem('gaia_token'); localStorage.removeItem('gaia_username'); localStorage.removeItem('gaia_is_creator');
-    setToken(null); setUsername(''); setConversations([]); setMessages([]); setCurrentConvId(null);
+    setToken(null); setUsername(''); setIsCreator(false); setConversations([]); setMessages([]); setCurrentConvId(null);
     setBirthChart(null); setShowAstro(false); setChartSvg(null); setChartSvgError('');
     setCharts([]); setSelectedPerson('yo'); setShowAddPerson(false);
+    setShowAudioRecorder(false); setShowAudioLibrary(false); setShowLearnings(false);
+    setAuthErr(msg);
   };
+
+  const handleLogout = async () => {
+    try { await api('/auth/logout', { method: 'POST' }, token); } catch {}
+    clearSession();
+  };
+
+  const handleSessionExpired = () => clearSession('Tu sesión ha caducado — vuelve a iniciar sesión.');
+  useEffect(() => {
+    onUnauthorized = handleSessionExpired;
+    return () => { onUnauthorized = null; };
+  });
 
   const fetchConvs = useCallback(async (tok = token) => {
     if (!tok) return;
@@ -1079,6 +1098,7 @@ export default function App() {
           authToken={token}
           onClose={() => setShowAudioRecorder(false)}
           onAudioReady={handleAudioReady}
+          onUnauthorized={handleSessionExpired}
         />
       )}
       {isCreator && showAudioLibrary && (
@@ -1086,6 +1106,7 @@ export default function App() {
           apiBase={API_URL}
           authToken={token}
           onClose={() => setShowAudioLibrary(false)}
+          onUnauthorized={handleSessionExpired}
         />
       )}
       {isCreator && showLearnings && (
@@ -1093,6 +1114,7 @@ export default function App() {
           apiBase={API_URL}
           authToken={token}
           onClose={() => setShowLearnings(false)}
+          onUnauthorized={handleSessionExpired}
         />
       )}
     </div>

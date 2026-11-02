@@ -1,0 +1,26 @@
+name: CI
+
+# Compila igual que Vercel (CI=true convierte los avisos de ESLint en errores).
+# El 28-ago-2026 un aviso de react-hooks/exhaustive-deps rompió todos los
+# despliegues de Vercel durante dos meses sin que nadie lo notara: si esto
+# falla en rojo aquí, también fallaría allí.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+      - name: Compilar (CI=true)
+        run: npm run build
+        env:
+          CI: 'true'

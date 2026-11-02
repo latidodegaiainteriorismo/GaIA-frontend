@@ -77,7 +77,15 @@ const S = {
   loading: { fontSize: "13px", color: "#6a5540", textAlign: "center", padding: "24px 0", fontStyle: "italic" },
 };
 
-export default function AudioLibrary({ apiBase, authToken, onClose }) {
+export default function AudioLibrary({ apiBase, authToken, onClose, onUnauthorized }) {
+  // En una ref para que cambiar la función no recree los callbacks de carga.
+  const onUnauthorizedRef = useRef(onUnauthorized);
+  onUnauthorizedRef.current = onUnauthorized;
+  const parseJson = useCallback((r) => {
+    if (r.status === 401) onUnauthorizedRef.current?.();
+    return r.json();
+  }, []);
+
   const [audios, setAudios]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [selected, setSelected] = useState(null); // audio_id seleccionado, o null = lista
@@ -92,12 +100,12 @@ export default function AudioLibrary({ apiBase, authToken, onClose }) {
     let cancelled = false;
     setLoading(true);
     fetch(`${apiBase}/audio/list`, { headers: { Authorization: `Bearer ${authToken}` } })
-      .then(r => r.json())
+      .then(parseJson)
       .then(data => { if (!cancelled) setAudios(data.audios || []); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [apiBase, authToken]);
+  }, [apiBase, authToken, parseJson]);
 
   // ── Al seleccionar un audio: cargar sus fragmentos + URL firmada ──────────
   const openAudio = useCallback(async (id) => {
@@ -108,14 +116,14 @@ export default function AudioLibrary({ apiBase, authToken, onClose }) {
     setActiveChunk(null);
     try {
       const [chunksRes, urlRes] = await Promise.all([
-        fetch(`${apiBase}/audio/${id}/chunks`, { headers: { Authorization: `Bearer ${authToken}` } }).then(r => r.json()),
-        fetch(`${apiBase}/audio/${id}/url`, { headers: { Authorization: `Bearer ${authToken}` } }).then(r => r.json()),
+        fetch(`${apiBase}/audio/${id}/chunks`, { headers: { Authorization: `Bearer ${authToken}` } }).then(parseJson),
+        fetch(`${apiBase}/audio/${id}/url`, { headers: { Authorization: `Bearer ${authToken}` } }).then(parseJson),
       ]);
       setChunks(chunksRes.chunks || []);
       if (urlRes.url) setAudioUrl(urlRes.url);
     } catch (_) {}
     setChunksLoading(false);
-  }, [apiBase, authToken]);
+  }, [apiBase, authToken, parseJson]);
 
   // ── Al pulsar un fragmento: saltar el audio a ese punto y reproducir ──────
   const playFrom = useCallback((chunk) => {
