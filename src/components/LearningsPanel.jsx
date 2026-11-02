@@ -18,7 +18,7 @@
  *   onClose    {func}    Callback para cerrar el panel
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 function fmtDate(iso) {
   try {
@@ -101,7 +101,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
   const [errorMsg, setErrorMsg] = useState('');
   const errorTimerRef = useRef(null);
 
-  const authHeaders = { Authorization: `Bearer ${authToken}` };
+  const authHeaders = useMemo(() => ({ Authorization: `Bearer ${authToken}` }), [authToken]);
 
   const showError = useCallback((status) => {
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
@@ -119,7 +119,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       .then(data => setBasalNotes(data.notes || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [apiBase, authToken]);
+  }, [apiBase, authHeaders]);
 
   const loadKnowledge = useCallback(() => {
     setLoading(true);
@@ -131,7 +131,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       .then(data => setKnowledgeItems(data.items || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [apiBase, authToken, catFilter]);
+  }, [apiBase, authHeaders, catFilter]);
 
   useEffect(() => {
     if (tab === 'basal') loadBasal();
@@ -152,7 +152,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       setBasalNotes(previous);
       showError();
     }
-  }, [apiBase, authToken, basalNotes, showError]);
+  }, [apiBase, authHeaders, basalNotes, showError]);
 
   const deleteBasal = useCallback(async (id) => {
     const previous = basalNotes;
@@ -164,7 +164,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       setBasalNotes(previous);
       showError();
     }
-  }, [apiBase, authToken, basalNotes, showError]);
+  }, [apiBase, authHeaders, basalNotes, showError]);
 
   const promoteKnowledge = useCallback(async (id, visibility) => {
     const previous = knowledgeItems;
@@ -180,7 +180,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       setKnowledgeItems(previous);
       showError();
     }
-  }, [apiBase, authToken, knowledgeItems, showError]);
+  }, [apiBase, authHeaders, knowledgeItems, showError]);
 
   const deleteKnowledge = useCallback(async (id) => {
     const previous = knowledgeItems;
@@ -192,7 +192,7 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
       setKnowledgeItems(previous);
       showError();
     }
-  }, [apiBase, authToken, knowledgeItems, showError]);
+  }, [apiBase, authHeaders, knowledgeItems, showError]);
 
   return (
     <div style={S.overlay} onClick={(e) => e.target === e.currentTarget && onClose?.()}>
