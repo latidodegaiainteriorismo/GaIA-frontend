@@ -18,7 +18,7 @@
  *   onClose    {func}    Callback para cerrar el panel
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 function fmtDate(iso) {
   try {
@@ -85,6 +85,11 @@ const S = {
 
   empty: { fontSize: "13px", color: "#6a5540", textAlign: "center", padding: "24px 0", fontStyle: "italic" },
   loading: { fontSize: "13px", color: "#6a5540", textAlign: "center", padding: "24px 0", fontStyle: "italic" },
+  error: {
+    fontSize: "12px", textAlign: "center", padding: "7px 12px", borderRadius: "10px",
+    background: "rgba(200,90,70,0.14)", color: "#e0a080",
+    border: "1px solid rgba(200,90,70,0.28)", flexShrink: 0,
+  },
 };
 
 export default function LearningsPanel({ apiBase, authToken, onClose }) {
@@ -93,8 +98,19 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
   const [knowledgeItems, setKnowledgeItems] = useState([]);
   const [catFilter, setCatFilter] = useState(null); // null | 'Enciclopedia de la Biología' | 'Astrología'
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+  const errorTimerRef = useRef(null);
 
   const authHeaders = { Authorization: `Bearer ${authToken}` };
+
+  const showError = useCallback((status) => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    const text = status === 401
+      ? 'Tu sesión ha caducado — vuelve a iniciar sesión para guardar cambios.'
+      : 'No se pudo guardar el cambio — inténtalo de nuevo.';
+    setErrorMsg(text);
+    errorTimerRef.current = setTimeout(() => setErrorMsg(''), 4000);
+  }, []);
 
   const loadBasal = useCallback(() => {
     setLoading(true);
@@ -123,40 +139,60 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
   }, [tab, loadBasal, loadKnowledge]);
 
   const toggleBasal = useCallback(async (id, active) => {
+    const previous = basalNotes;
     setBasalNotes(prev => prev.map(n => n.id === id ? { ...n, active } : n));
     try {
-      await fetch(`${apiBase}/learnings/basal/${id}/toggle`, {
+      const res = await fetch(`${apiBase}/learnings/basal/${id}/toggle`, {
         method: "PATCH",
         headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ active }),
       });
-    } catch (_) {}
-  }, [apiBase, authToken]);
+      if (!res.ok) { setBasalNotes(previous); showError(res.status); }
+    } catch (_) {
+      setBasalNotes(previous);
+      showError();
+    }
+  }, [apiBase, authToken, basalNotes, showError]);
 
   const deleteBasal = useCallback(async (id) => {
+    const previous = basalNotes;
     setBasalNotes(prev => prev.filter(n => n.id !== id));
     try {
-      await fetch(`${apiBase}/learnings/basal/${id}`, { method: "DELETE", headers: authHeaders });
-    } catch (_) {}
-  }, [apiBase, authToken]);
+      const res = await fetch(`${apiBase}/learnings/basal/${id}`, { method: "DELETE", headers: authHeaders });
+      if (!res.ok) { setBasalNotes(previous); showError(res.status); }
+    } catch (_) {
+      setBasalNotes(previous);
+      showError();
+    }
+  }, [apiBase, authToken, basalNotes, showError]);
 
   const promoteKnowledge = useCallback(async (id, visibility) => {
+    const previous = knowledgeItems;
     setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, visibility } : k));
     try {
-      await fetch(`${apiBase}/learnings/knowledge/${id}/promote`, {
+      const res = await fetch(`${apiBase}/learnings/knowledge/${id}/promote`, {
         method: "PATCH",
         headers: { ...authHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ visibility }),
       });
-    } catch (_) {}
-  }, [apiBase, authToken]);
+      if (!res.ok) { setKnowledgeItems(previous); showError(res.status); }
+    } catch (_) {
+      setKnowledgeItems(previous);
+      showError();
+    }
+  }, [apiBase, authToken, knowledgeItems, showError]);
 
   const deleteKnowledge = useCallback(async (id) => {
+    const previous = knowledgeItems;
     setKnowledgeItems(prev => prev.filter(k => k.id !== id));
     try {
-      await fetch(`${apiBase}/learnings/knowledge/${id}`, { method: "DELETE", headers: authHeaders });
-    } catch (_) {}
-  }, [apiBase, authToken]);
+      const res = await fetch(`${apiBase}/learnings/knowledge/${id}`, { method: "DELETE", headers: authHeaders });
+      if (!res.ok) { setKnowledgeItems(previous); showError(res.status); }
+    } catch (_) {
+      setKnowledgeItems(previous);
+      showError();
+    }
+  }, [apiBase, authToken, knowledgeItems, showError]);
 
   return (
     <div style={S.overlay} onClick={(e) => e.target === e.currentTarget && onClose?.()}>
@@ -174,6 +210,8 @@ export default function LearningsPanel({ apiBase, authToken, onClose }) {
           <div style={S.tab(tab === 'basal')} onClick={() => setTab('basal')}>Estructura Basal</div>
           <div style={S.tab(tab === 'knowledge')} onClick={() => setTab('knowledge')}>Enciclopedia / Astrología</div>
         </div>
+
+        {errorMsg && <div style={S.error}>{errorMsg}</div>}
 
         {tab === 'knowledge' && (
           <div style={S.catFilter}>

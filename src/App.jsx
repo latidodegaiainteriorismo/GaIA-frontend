@@ -255,7 +255,16 @@ export default function App() {
 
   const deleteConv = async (e, id) => {
     e.stopPropagation();
-    try { await api(`/conversations/${id}`, { method: 'DELETE' }, token); } catch {}
+    try {
+      const data = await api(`/conversations/${id}`, { method: 'DELETE' }, token);
+      if (data && data.error) {
+        alert(`No se pudo eliminar la conversación: ${data.error}`);
+        return;
+      }
+    } catch {
+      alert('No se pudo eliminar la conversación — revisa tu conexión e inténtalo de nuevo.');
+      return;
+    }
     setConversations(prev => prev.filter(c => c.id !== id));
     if (currentConvId === id) { setCurrentConvId(null); setMessages([]); }
   };

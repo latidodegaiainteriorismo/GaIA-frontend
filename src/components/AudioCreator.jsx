@@ -140,6 +140,9 @@ const S = {
     borderLeft: "2px solid rgba(212,174,120,0.2)", paddingLeft: "10px",
   },
   meta: { fontSize: "12px", color: "#6a5540", display: "flex", gap: "16px" },
+  targetDialog: { display: "flex", flexDirection: "column", gap: "12px" },
+  targetQuestion: { fontSize: "14px", color: "#d8c5a0", textAlign: "center" },
+  targetFilename: { fontSize: "12px", color: "#8a7055", textAlign: "center", fontStyle: "italic" },
 };
 
 export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady }) {
@@ -156,6 +159,11 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
   // pendientes de enviarse todos juntos al chat cuando se pulse "Guardar"
   // definitivo. Cada entrada: { id, transcript, title }.
   const [queue, setQueue] = useState([]);
+  // Archivo seleccionado del disco, pendiente de elegir destino (memoria
+  // conversacional vs. base de conocimiento) antes de subirlo. Grabar en
+  // vivo no pasa por aquí — siempre es memoria conversacional (target por
+  // defecto en el backend).
+  const [pendingFile, setPendingFile] = useState(null);
   // Mensaje breve de confirmación tras aceptar/descartar un audio — se
   // autolimpia a los 2.5s. Independiente del "phase" para que no
   // interfiera con la transición idle/recording/uploading/done.
@@ -184,13 +192,17 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
   }, []);
 
   // ── handleUpload declarado ANTES de startRecording para evitar TDZ ──────────
-  const handleUpload = useCallback(async (blob, filename) => {
+  // target: 'conversational' (por defecto — se envía como pregunta al chat)
+  // o 'knowledge' (se archiva directo en la base de conocimiento, sin
+  // generar respuesta — pensado para audios históricos seleccionados del disco).
+  const handleUpload = useCallback(async (blob, filename, target = "conversational") => {
     setPhase("uploading");
     setProgress(10);
     setProgressMsg("Subiendo audio...");
 
     const formData = new FormData();
     formData.append("audio", blob, filename);
+    formData.append("target", target);
 
     try {
       setProgress(30);
@@ -284,11 +296,27 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
     }
   }, []);
 
+  // No sube directo: primero hay que elegir el destino (ver pendingFile).
   const handleFileSelect = useCallback((e) => {
     const file = e.target.files?.[0];
+    e.target.value = ""; // permite volver a elegir el mismo archivo si se cancela
     if (!file) return;
-    handleUpload(file, file.name);
-  }, [handleUpload]);
+    const maxBytes = 25 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      alert(`El archivo supera los 25MB permitidos por Whisper (${(file.size / 1024 / 1024).toFixed(1)}MB). Usa un fragmento más corto.`);
+      return;
+    }
+    setPendingFile(file);
+  }, []);
+
+  const confirmFileTarget = useCallback((target) => {
+    if (!pendingFile) return;
+    const file = pendingFile;
+    setPendingFile(null);
+    handleUpload(file, file.name, target);
+  }, [pendingFile, handleUpload]);
+
+  const cancelFileTarget = useCallback(() => setPendingFile(null), []);
 
   // ── Persistir SOLO el título (sin decidir nada sobre el destino del audio) ──
   // Se usa tanto en onBlur del campo de texto como paso previo a las tres
@@ -342,6 +370,12 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
     setSavingTitle(true);
     await persistTitle(result.id, editTitle);
     setSavingTitle(false);
+    // Los audios archivados en la base de conocimiento no se envían al chat.
+    if (result.visibility === "all") {
+      showFlash("✓ Archivado en la base de conocimiento", "ok");
+      reset();
+      return;
+    }
     const nuevoTotal = queue.length + 1;
     setQueue(prev => [...prev, {
       id: result.id,
@@ -362,13 +396,14 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
     await persistTitle(result.id, editTitle);
     setSavingTitle(false);
 
-    const fullQueue = [...queue, {
+    // Los audios archivados en la base de conocimiento no se envían al chat.
+    const fullQueue = result.visibility === "all" ? queue : [...queue, {
       id: result.id,
       transcript: result.transcript_full || result.transcript_preview || "",
       title: editTitle.trim(),
     }];
 
-    if (onAudioReady) onAudioReady(fullQueue);
+    if (onAudioReady && fullQueue.length > 0) onAudioReady(fullQueue);
     onClose?.();
   }, [result, editTitle, queue, persistTitle, onAudioReady, onClose]);
 
@@ -407,7 +442,23 @@ export default function AudioCreator({ apiBase, authToken, onClose, onAudioReady
           <div style={S.flash(flashMsg.tone)}>{flashMsg.text}</div>
         )}
 
-        {(phase === "idle" || isRecording) && (
+        {phase === "idle" && pendingFile && (
+          <div style={S.targetDialog}>
+            <p style={S.targetQuestion}>¿A dónde va este audio?</p>
+            <p style={S.targetFilename}>{pendingFile.name}</p>
+            <div style={S.btnRow}>
+              <button style={S.btnPrimary} onClick={() => confirmFileTarget("conversational")}>
+                💬 Memoria conversacional
+              </button>
+              <button style={S.btnPrimary} onClick={() => confirmFileTarget("knowledge")}>
+                📚 Base de conocimiento
+              </button>
+            </div>
+            <button style={S.btnSecondary} onClick={cancelFileTarget}>Cancelar</button>
+          </div>
+        )}
+
+        {((phase === "idle" && !pendingFile) || isRecording) && (
           <>
             <div style={S.recorderZone}>
               <div style={S.pulseRing(isRecording)}>
