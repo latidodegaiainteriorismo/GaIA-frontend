@@ -16,6 +16,7 @@ Frontend de GaIA, app de compañía espiritual con IA. Consume el backend de `la
 - **Avatar con efectos de luz ambiental**: halo con Web Audio API (analizador de volumen), glow con `conic-gradient`, animación `gaiaSpin`.
 - **AudioContext**: se desbloquea con gesto del usuario (requisito de los navegadores para reproducir audio).
 - **Reproducción de audio**: replay por mensaje individual, reproducción de texto seleccionado, pausa/reanudación sin perder la posición.
+- **Voz por bloques (nov-2026)**: con sesión, `/chat` se llama con `audio_aparte: true` (devuelve solo el texto) y `speakMessage` trocea la respuesta (`src/vozPorBloques.js`: primer bloque ~500 caracteres, el resto ≤1200, siempre en frase completa), pide cada bloque a `/tts` mientras suena el anterior y los encadena; los audios se guardan en el mensaje (`audioBlocks`) para repetir sin volver a sintetizar. El modo temporal (sin sesión, `/tts` exige login) sigue con el audio único de `/chat`, limitado a 2200 caracteres.
 
 ## Cuidado con esto
 - Cualquier cambio en la lógica de audio debe respetar el desbloqueo de AudioContext por gesto de usuario — si se rompe, el audio deja de sonar en la mayoría de navegadores (política estándar de autoplay).

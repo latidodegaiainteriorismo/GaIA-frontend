@@ -24,3 +24,7 @@ jobs:
         run: npm run build
         env:
           CI: 'true'
+      - name: Pruebas
+        run: npm test -- --watchAll=false
+        env:
+          CI: 'true'

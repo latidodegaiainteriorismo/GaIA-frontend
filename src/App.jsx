@@ -4,6 +4,7 @@ import gaiaAvatar from './assets/gaia-avatar.png';
 import AudioCreator from './components/AudioCreator';
 import AudioLibrary from './components/AudioLibrary';
 import LearningsPanel from './components/LearningsPanel';
+import { dividirEnBloques } from './vozPorBloques';
 
 const API_URL    = process.env.REACT_APP_API_URL    || 'https://gaia-2py8.onrender.com';
 const GOOGLE_CID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
@@ -331,9 +332,13 @@ export default function App() {
   // ── Audio + análisis de volumen para animar la boca ─────────────────────
   // msgId: identificador del mensaje al que pertenece este audio, para poder
   // saber (desde cualquier burbuja del chat) si es el que está sonando ahora.
-  const playAudio = useCallback((b64, msgId = null) => {
+  //
+  // Devuelve una promesa que se cumple cuando el audio termina (o falla). hayMas=true
+  // indica que otro bloque de la misma respuesta sigue a este: no se pasa a "idle".
+  const playAudio = useCallback((b64, msgId = null, hayMas = false) => new Promise((resolve) => {
     try {
       unlockAudioContext(); // dentro del gesto de clic siempre que sea posible
+      cancelAnimationFrame(mouthRafRef.current); // por si el bloque anterior seguía animando la boca
 
       const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
       const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
@@ -376,27 +381,23 @@ export default function App() {
           setMouthOpen(0);
         }
       };
-      audio.onended = () => {
-        setStatus('idle');
-        setPlayingMsgId(null);
-        cancelAnimationFrame(mouthRafRef.current);
-        smoothMouthRef.current = 0;
-        setMouthOpen(0);
+      const terminar = () => {
+        if (!hayMas) {
+          setStatus('idle');
+          setPlayingMsgId(null);
+          cancelAnimationFrame(mouthRafRef.current);
+          smoothMouthRef.current = 0;
+          setMouthOpen(0);
+        }
         URL.revokeObjectURL(url);
         if (audioRef.current === audio) audioRef.current = null;
+        resolve();
       };
-      audio.onerror = () => {
-        setStatus('idle');
-        setPlayingMsgId(null);
-        cancelAnimationFrame(mouthRafRef.current);
-        smoothMouthRef.current = 0;
-        setMouthOpen(0);
-        URL.revokeObjectURL(url);
-        if (audioRef.current === audio) audioRef.current = null;
-      };
-      audio.play();
-    } catch (e) { console.error('[Audio]', e); setStatus('idle'); }
-  }, [unlockAudioContext]);
+      audio.onended = terminar;
+      audio.onerror = terminar;
+      audio.play().catch((e) => { console.warn('[Audio] No se pudo reproducir:', e); terminar(); });
+    } catch (e) { console.error('[Audio]', e); setStatus('idle'); resolve(); }
+  }), [unlockAudioContext]);
 
   // ── Pausar / reanudar el audio actualmente cargado (sin perder posición) ──
   const togglePauseAudio = useCallback(() => {
@@ -416,42 +417,84 @@ export default function App() {
   const [selectionLoading, setSelectionLoading] = useState(false);
   const [loadingAudioId, setLoadingAudioId] = useState(null);
 
+  // ── Leer un mensaje ENTERO por bloques ────────────────────────────────────
+  // Parte el texto en bloques de frases, pide cada uno a /tts mientras suena el
+  // anterior y los encadena. Al terminar guarda los audios en el mensaje
+  // (audioBlocks) para repetirlos sin volver a sintetizar. cachedBlocks: audios ya
+  // generados en una lectura anterior.
+  const speechJobRef = useRef(null);
+  const cancelSpeech = useCallback(() => {
+    if (speechJobRef.current) speechJobRef.current.cancelled = true;
+  }, []);
+
+  const speakMessage = useCallback(async (msgId, text, cachedBlocks = null) => {
+    unlockAudioContext();
+    cancelSpeech();
+    const job = { cancelled: false, msgId };
+    speechJobRef.current = job;
+    if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
+
+    const textBlocks = cachedBlocks ? null : dividirEnBloques(text);
+    const total = cachedBlocks ? cachedBlocks.length : textBlocks.length;
+    if (!total) return;
+    const audios = cachedBlocks ? [...cachedBlocks] : new Array(total).fill(null);
+    const pedir = (i) => (audios[i]
+      ? Promise.resolve(audios[i])
+      : api('/tts', { method: 'POST', body: JSON.stringify({ text: textBlocks[i] }) }, token)
+          .then(d => d.audio || null).catch(() => null));
+    const soltarCarga = () => setLoadingAudioId(prev => (prev === msgId ? null : prev));
+
+    setLoadingAudioId(msgId);
+    let siguiente = pedir(0);
+    let sono = false;
+    for (let i = 0; i < total; i++) {
+      const b64 = await siguiente;
+      if (job.cancelled) { soltarCarga(); return; }
+      audios[i] = b64;
+      if (i === 0) soltarCarga();
+      siguiente = i + 1 < total ? pedir(i + 1) : null;   // se va generando mientras suena este
+      if (!b64) continue;                                  // un bloque que falla se salta
+      sono = true;
+      await playAudio(b64, msgId, i + 1 < total);
+      if (job.cancelled) return;
+    }
+    if (speechJobRef.current === job) speechJobRef.current = null;
+    if (!sono) { soltarCarga(); setStatus('idle'); setPlayingMsgId(null); return; }
+    if (!cachedBlocks && audios.every(Boolean)) {
+      setMessages(prev => prev.map(m => (m.id === msgId ? { ...m, audioBlocks: audios } : m)));
+    }
+  }, [unlockAudioContext, cancelSpeech, playAudio, token]);
+
   // ── Reproducir (o pausar/reanudar si ya es el activo) el audio de un mensaje ──
-  // Funciona tanto para respuestas de GaIA (que ya traen audio generado) como
-  // para preguntas del usuario (que no lo tienen — se genera la primera vez
-  // que se pulsa, vía /tts, y se guarda en el propio mensaje para no volver
-  // a sintetizarlo si se repite).
+  // Funciona tanto para respuestas de GaIA como para preguntas del usuario: la
+  // primera vez se genera por bloques vía /tts (el mensaje entero, sea cual sea su
+  // largo) y se guarda en el propio mensaje para no volver a sintetizarlo.
   const toggleMessageAudio = useCallback(async (msg) => {
     // Ya es el audio activo -> pausar/reanudar sin perder posición
-    if (msg.audio && playingMsgIdRef.current === msg.id && audioRef.current) {
+    if (playingMsgIdRef.current === msg.id && audioRef.current) {
       togglePauseAudio();
       return;
     }
-    // Ya tiene audio (de antes) -> reproducir desde el principio
+    // Entre un bloque y el siguiente no hay audio activo: no reiniciar la lectura
+    const job = speechJobRef.current;
+    if (job && !job.cancelled && job.msgId === msg.id) return;
+    // Ya se leyó por bloques -> repetir sin volver a sintetizar
+    if (msg.audioBlocks) { speakMessage(msg.id, msg.content, msg.audioBlocks); return; }
+    // Audio único de /chat (modo temporal) -> reproducir desde el principio
     if (msg.audio) {
+      cancelSpeech();
       if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
       playAudio(msg.audio, msg.id);
       return;
     }
-    // Sin audio todavía (mensaje del usuario, normalmente) -> generarlo ahora
+    // Sin audio todavía -> generarlo ahora, por bloques
     if (loadingAudioId) return; // evita pedidos duplicados si ya hay uno en curso
-    unlockAudioContext();
-    setLoadingAudioId(msg.id);
-    try {
-      const data = await api('/tts', { method: 'POST', body: JSON.stringify({ text: msg.content }) }, token);
-      if (data.audio) {
-        setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, audio: data.audio } : m)));
-        if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
-        playAudio(data.audio, msg.id);
-      }
-    } catch (err) {
-      console.error('[Audio] Error generando audio bajo demanda:', err);
-    }
-    setLoadingAudioId(null);
-  }, [playAudio, togglePauseAudio, unlockAudioContext, token, loadingAudioId]);
+    speakMessage(msg.id, msg.content);
+  }, [playAudio, togglePauseAudio, speakMessage, cancelSpeech, loadingAudioId]);
 
   // ── Detener audio ─────────────────────────────────────────────────────────
   const stopAudio = useCallback(() => {
+    cancelSpeech();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -460,8 +503,9 @@ export default function App() {
     smoothMouthRef.current = 0;
     setMouthOpen(0);
     setPlayingMsgId(null);
+    setLoadingAudioId(null);
     setStatus('idle');
-  }, []);
+  }, [cancelSpeech]);
 
   // ── Reproducir solo el texto seleccionado de una respuesta ───────────────
   const handleTextSelection = useCallback((msg) => {
@@ -483,6 +527,7 @@ export default function App() {
       // fragmento seleccionado, sin pasar por Groq.
       const data = await api('/tts', { method: 'POST', body: JSON.stringify({ text: selection.text }) }, token);
       if (data.audio) {
+        cancelSpeech();
         if (audioRef.current) { try { audioRef.current.pause(); } catch {} }
         playAudio(data.audio, null); // null = no pertenece a ningún mensaje del historial
       }
@@ -492,7 +537,7 @@ export default function App() {
     setSelectionLoading(false);
     setSelection({ msgId: null, text: '' });
     window.getSelection()?.removeAllRanges();
-  }, [selection, token, playAudio, unlockAudioContext]);
+  }, [selection, token, playAudio, unlockAudioContext, cancelSpeech]);
 
   // ── Call GaIA ─────────────────────────────────────────────────────────────
   const callGaIA = useCallback(async (userMessage) => {
@@ -501,6 +546,9 @@ export default function App() {
       const body = {
         message:    userMessage,
         voice_mode: true,        // ← siempre con audio, en voz Y en texto
+        // Con sesión, la voz se pide aparte y por bloques (speakMessage): el texto llega al
+        // instante y se lee la respuesta entera. El modo temporal no tiene sesión para /tts.
+        audio_aparte: !temporary,
         temporary
       };
       if (temporary) {
@@ -519,6 +567,7 @@ export default function App() {
       const newId = newMsgId();
       setMessages(prev => [...prev, { id: newId, role: 'assistant', content: gaiaText, audio: data.audio || null }]);
       if (data.audio) playAudio(data.audio, newId);
+      else if (!temporary && data.text) { setStatus('idle'); speakMessage(newId, gaiaText); }
       else setStatus('idle');
     } catch (err) {
       console.error(err);
@@ -526,7 +575,7 @@ export default function App() {
       setStatus('idle');
     }
     setIsLoading(false); setStatusText('');
-  }, [temporary, currentConvId, token, playAudio, fetchConvs]);
+  }, [temporary, currentConvId, token, playAudio, speakMessage, fetchConvs]);
 
   // ── Mic ───────────────────────────────────────────────────────────────────
   const startListening = useCallback(() => {
@@ -787,7 +836,7 @@ export default function App() {
                           ? 'pausar'
                           : playingMsgId === msg.id && status === 'paused'
                             ? 'reanudar'
-                            : msg.audio ? 'escuchar de nuevo' : 'escuchar'}
+                            : (msg.audio || msg.audioBlocks) ? 'escuchar de nuevo' : 'escuchar'}
                     </span>
                   </button>
                 )}
