@@ -56,13 +56,13 @@ export default function App() {
   const [birthChart,    setBirthChart]    = useState(null);   // null = aún no consultado
   const [astroLoading,  setAstroLoading]  = useState(false);
   const [astroError,    setAstroError]    = useState('');
-  const [astroForm,     setAstroForm]     = useState({ birth_date: '', birth_time: '', birth_place: '' });
+  const [astroForm,     setAstroForm]     = useState({ birth_date: '', birth_time: '', birth_place: '', time_unknown: false });
 
   // ── Astrología: varias personas ──────────────────────────────────────────
   const [charts,          setCharts]          = useState([]);       // lista de personas guardadas
   const [selectedPerson,  setSelectedPerson]  = useState('yo');      // persona activa en el modal
   const [showAddPerson,   setShowAddPerson]   = useState(false);
-  const [personForm,      setPersonForm]      = useState({ person_name: '', relationship: '', birth_date: '', birth_time: '', birth_place: '' });
+  const [personForm,      setPersonForm]      = useState({ person_name: '', relationship: '', birth_date: '', birth_time: '', birth_place: '', time_unknown: false });
 
   // ── Visor de carta (SVG) ─────────────────────────────────────────────────
   const [chartSvg,       setChartSvg]       = useState(null);   // svg como string, o null
@@ -196,16 +196,16 @@ export default function App() {
   }, [fetchBirthChart]);
 
   const submitBirthChart = useCallback(async () => {
-    const { birth_date, birth_time, birth_place } = astroForm;
-    if (!birth_date || !birth_time || !birth_place.trim()) {
-      setAstroError('Completa fecha, hora y lugar de nacimiento.');
+    const { birth_date, birth_time, birth_place, time_unknown } = astroForm;
+    if (!birth_date || (!birth_time && !time_unknown) || !birth_place.trim()) {
+      setAstroError('Completa fecha, hora (o marca «no sé la hora») y lugar de nacimiento.');
       return;
     }
     setAstroLoading(true); setAstroError('');
     try {
       const data = await api('/astrology/birth-chart', {
         method: 'POST',
-        body: JSON.stringify({ birth_date, birth_time, birth_place: birth_place.trim(), person_label: 'yo' })
+        body: JSON.stringify({ birth_date, birth_time: time_unknown ? '' : birth_time, time_unknown, birth_place: birth_place.trim(), person_label: 'yo' })
       }, token);
       if (data.error) { setAstroError(data.error); }
       else { setBirthChart(data); fetchCharts(); }
@@ -217,9 +217,9 @@ export default function App() {
 
   // ── Astrología: añadir otra persona ──────────────────────────────────────
   const submitNewPerson = useCallback(async () => {
-    const { person_name, relationship, birth_date, birth_time, birth_place } = personForm;
-    if (!person_name.trim() || !birth_date || !birth_time || !birth_place.trim()) {
-      setAstroError('Completa nombre, fecha, hora y lugar de nacimiento.');
+    const { person_name, relationship, birth_date, birth_time, birth_place, time_unknown } = personForm;
+    if (!person_name.trim() || !birth_date || (!birth_time && !time_unknown) || !birth_place.trim()) {
+      setAstroError('Completa nombre, fecha, hora (o marca «no sé la hora») y lugar de nacimiento.');
       return;
     }
     setAstroLoading(true); setAstroError('');
@@ -228,7 +228,7 @@ export default function App() {
       const data = await api('/astrology/birth-chart', {
         method: 'POST',
         body: JSON.stringify({
-          birth_date, birth_time, birth_place: birth_place.trim(),
+          birth_date, birth_time: time_unknown ? '' : birth_time, time_unknown, birth_place: birth_place.trim(),
           person_label, relationship: relationship.trim() || null
         })
       }, token);
@@ -236,7 +236,7 @@ export default function App() {
       else {
         await fetchCharts();
         setShowAddPerson(false);
-        setPersonForm({ person_name: '', relationship: '', birth_date: '', birth_time: '', birth_place: '' });
+        setPersonForm({ person_name: '', relationship: '', birth_date: '', birth_time: '', birth_place: '', time_unknown: false });
         selectPerson(person_label);
       }
     } catch {
@@ -1021,9 +1021,13 @@ export default function App() {
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input type="date" value={personForm.birth_date} onChange={e => setPersonForm(f => ({ ...f, birth_date: e.target.value }))}
                     style={{ flex: 1, padding: '9px 10px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
-                  <input type="time" value={personForm.birth_time} onChange={e => setPersonForm(f => ({ ...f, birth_time: e.target.value }))}
-                    style={{ flex: 1, padding: '9px 10px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                  <input type="time" value={personForm.birth_time} disabled={personForm.time_unknown} onChange={e => setPersonForm(f => ({ ...f, birth_time: e.target.value }))}
+                    style={{ flex: 1, padding: '9px 10px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46', opacity: personForm.time_unknown ? .4 : 1 }} />
                 </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#4A7B7E', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={personForm.time_unknown} onChange={e => setPersonForm(f => ({ ...f, time_unknown: e.target.checked }))} />
+                  No sé la hora (sin Ascendente ni casas)
+                </label>
                 <input type="text" value={personForm.birth_place} onChange={e => setPersonForm(f => ({ ...f, birth_place: e.target.value }))}
                   placeholder="Ciudad, país" autoComplete="off"
                   style={{ padding: '9px 12px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '12px', background: 'white', fontSize: '13px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
@@ -1056,8 +1060,12 @@ export default function App() {
 
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                     <span style={{ fontSize: '11px', color: '#4A7B7E', opacity: .8, fontStyle: 'italic' }}>Hora de nacimiento (local)</span>
-                    <input type="time" value={astroForm.birth_time} onChange={e => setAstroForm(f => ({ ...f, birth_time: e.target.value }))}
-                      style={{ padding: '10px 14px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '14px', background: 'white', fontSize: '14px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46' }} />
+                    <input type="time" value={astroForm.birth_time} disabled={astroForm.time_unknown} onChange={e => setAstroForm(f => ({ ...f, birth_time: e.target.value }))}
+                      style={{ padding: '10px 14px', border: '0.5px solid rgba(74,74,70,.2)', borderRadius: '14px', background: 'white', fontSize: '14px', outline: 'none', fontFamily: 'inherit', color: '#4A4A46', opacity: astroForm.time_unknown ? .4 : 1 }} />
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#4A7B7E', marginTop: '2px' }}>
+                      <input type="checkbox" checked={astroForm.time_unknown} onChange={e => setAstroForm(f => ({ ...f, time_unknown: e.target.checked }))} />
+                      No sé la hora (sin Ascendente ni casas)
+                    </span>
                   </label>
 
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
